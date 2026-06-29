@@ -1,6 +1,6 @@
 {
     "block": true,
-    "background_port": 5555,
+    "win": false,
     "programs": [
         {
             "name": "Notepad",

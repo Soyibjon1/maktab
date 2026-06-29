@@ -1,7 +1,7 @@
 from threading import Thread
 
 import customtkinter as ctk
-import keyboard, json, os, subprocess, pywinstyles
+import keyboard, json, os, subprocess, pywinstyles, sys
 
 from client_agent import ClientAgent
 from rasm_tahrir import get_program_icon, get_wallpaper
@@ -41,12 +41,15 @@ def keyingi(rasm_manzil=None):
 def block_and_warn(combo):
     if combo == "alt+f5":
         wp.configure(image=get_wallpaper(keyingi(), olcham))
-    elif combo == "chiqish":
+    elif combo == "chiqish" or combo == "ctrl+alt+shift+break":
         agent.stop()
+        sys.exit(0)
     print(f"'{combo}' bloklangan - bu amal taqiqlangan!")
 
 root.protocol("WM_DELETE_WINDOW", lambda: block_and_warn("chiqish"))
-for combo in ("windows", "alt+f4", "alt+f5", "alt+tab", "ctrl+esc", "ctrl+alt+delete", "ctrl+shift+esc", "ctrl+c+h"):
+taqiq = ("windows", "alt+f4", "alt+f5", "alt+tab", "ctrl+esc", "ctrl+alt+delete", "ctrl+shift+esc", "ctrl+c+h", "ctrl+alt+shift+break")
+
+for combo in taqiq:
     keyboard.add_hotkey(combo, lambda c=combo: block_and_warn(c), suppress=True)
 
 
@@ -70,6 +73,9 @@ def _setup_program_grid():
         root.deiconify()
     else:
         root.withdraw()
+
+    if raw.get('win'):
+        keyboard.remove_hotkey("windows")
 
     dasturlar = [ProgramEntry(**item) for item in raw.get("programs", [])]
     allowed_programs = [i for i in dasturlar if i.allowed]
