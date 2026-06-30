@@ -15,7 +15,7 @@ from client_agent import ClientAgent
 from rasm_tahrir import get_program_icon, get_wallpaper
 
 CONFIG_PATH = "config.json"
-
+agent=None
 
 # ---------------------------------------------------------------------------
 # KONSOL OYNASINI YASHIRISH
@@ -52,9 +52,6 @@ class ProgramEntry:
 # ---------------------------------------------------------------------------
 
 root = ctk.CTk()
-
-_ism_oynasi = ctk.CTkInputDialog(text="Ismingizni kiriting:", title="Talaba")
-TALABA_ISMI = (_ism_oynasi.get_input() or "").strip() or platform.node() or "Noma'lum"
 
 root.deiconify()
 root.attributes("-fullscreen", True)
@@ -231,14 +228,18 @@ _setup_program_grid()
 # ---------------------------------------------------------------------------
 # SERVERGA ULANISH (talaba kiritgan ism bilan)
 # ---------------------------------------------------------------------------
+def aloqa():
+    global agent
+    _ism_oynasi = ctk.CTkInputDialog(text="Ismingizni kiriting:", title="Talaba")
+    TALABA_ISMI = (_ism_oynasi.get_input() or "").strip() or platform.node() or "Noma'lum"
 
-agent = ClientAgent(
-    reload=lambda: root.after(0, yangilash),  # tarmoq threadidan emas, asosiy threadda bajariladi
-    name=TALABA_ISMI,
-    on_lower=lambda: root.after(0, root.lower),
-)
-Thread(target=agent.run, daemon=True).start()
-
+    agent = ClientAgent(
+        reload=lambda: root.after(0, yangilash),  # tarmoq threadidan emas, asosiy threadda bajariladi
+        name=TALABA_ISMI,
+        on_lower=lambda: root.after(0, root.lower),
+    )
+    Thread(target=agent.run, daemon=True).start()
+root.after(10, aloqa)
 
 # ---------------------------------------------------------------------------
 # F11 - DASTURNI ORQAGA TUSHIRISH (cheklovsiz, doim ishlaydi)
