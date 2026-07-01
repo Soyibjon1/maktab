@@ -3,7 +3,7 @@ import requests
 
 CURRENT = "1.0.0"
 REPO    = "Soyibjon1/maktab"
-BRANCH  = "master"
+BRANCH  = "main"
 FILES   = ["Talaba.py", "client_agent.py", "updater.py"]
 
 # Fayllar Talaba.py bilan bir papkada bo'ladi.
@@ -13,11 +13,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def check_and_update() -> bool:
-    """
-    GitHub'dan version.txt ni tekshiradi. Agar yangi versiya bo'lsa,
-    barcha FILES ni yuklab, BASE_DIR ga saqlaydi va True qaytaradi.
-    Yangilanish yo'q yoki tarmoq xatosi bo'lsa False qaytaradi.
-    """
+
     try:
         r = requests.get(
             f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/version.txt",
