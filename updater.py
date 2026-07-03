@@ -24,6 +24,7 @@ def check_and_update() -> bool:
         )
         r.raise_for_status()
         if r.text.strip() == CURRENT:
+            print(f"Yagilanihs mavjud emas {r.text.strip()}:{CURRENT}")
             return False
 
         for filename in FILES:
