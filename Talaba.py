@@ -68,14 +68,6 @@ wp.place(x=0, y=0)
 def keyingi_rasm():
     return next(_rasm_aylanma)
 
-# ---------------------------------------------------------------------------
-# LOGIN FRAME — CTkInputDialog o'rniga
-# ---------------------------------------------------------------------------
-# CTkInputDialog asosiy oyna ochilmagan paytda ochilib, fon dasturlarga
-# kirish imkonini berardi. Bu LoginFrame esa asosiy oyna to'liq ekranda
-# va eng ustida bo'lganidan KEYIN, uning USTIDA ochiladi — talaba boshqa
-# oynalarga o'ta olmaydi.
-
 class LoginFrame(ctk.CTkFrame):
     def __init__(self, master, on_login):
         super().__init__(master, fg_color="#000000", corner_radius=0)
@@ -155,19 +147,6 @@ def _do_exit():
     except Exception:
         pass
     os._exit(0)
-
-# ---------------------------------------------------------------------------
-# KLAVIATURA CHEKLOVLARI
-# ---------------------------------------------------------------------------
-# MUAMMO (eski kod): keyboard.add_hotkey(..., suppress=True) global hook
-# o'rnatadi. Bu hook ba'zan kirill harflari, -, +, va boshqa tugmalar
-# bilan to'qnash kelib ularni "yutib yuboradi". Ayniqsa Win+tugmalar
-# Magnifier shortcut lari bilan chalkashishi mumkin.
-#
-# YECHIM: bitta tugma bloklash uchun block_key() ishlatiladi (eng past
-# darajali, boshqa tugmalarga xalaqit bermaydi). Kombinatsiyalar uchun
-# suppress=True faqat haqiqiy zarur joylarda qoldirildi. ALWAYS_ON
-# tugmalar uchun suppress=True UMUMAN ishlatilmaydi.
 
 ALWAYS_ON_KEYS = {
     "alt+f5":               lambda: root.after(0, lambda: wp.configure(
@@ -261,26 +240,6 @@ def _setup_program_grid():
 
 def yangilash():
     _setup_program_grid()
-
-# ---------------------------------------------------------------------------
-# AUDIO IJRO (serverdan kelgan audio)
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# AUDIO IJRO (serverdan kelgan audio)
-# ---------------------------------------------------------------------------
-# MUHIM: pygame O'RNIGA winsound ishlatiladi - bu Python bilan birga
-# keladigan STANDART kutubxona (hech narsa pip orqali o'rnatish shart
-# emas). pygame Python 3.14 uchun hali tayyor (prebuilt) wheel chiqarmagan
-# va manbadan build qilish uchun Visual C++ compiler talab qiladi - bu
-# talaba kompyuterlarida bo'lishi mumkin emas.
-#
-# CHEKLOV: winsound faqat WAV formatini ijro qiladi va haqiqiy "pauza"
-# funksiyasiga ega EMAS (faqat play/stop). Shu sababli:
-#   - MP3/boshqa formatlar avval WAV'ga aylantiriladi (pydub orqali,
-#     bu allaqachon tezlikni o'zgartirish uchun ishlatilgan edi)
-#   - "Pauza" o'rniga faqat "Stop" mavjud (serverdan audio_control
-#     "pause" kelsa, xuddi shu narsa - to'xtatish - bajariladi)
 
 import winsound
 

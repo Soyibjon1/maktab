@@ -1,15 +1,11 @@
 import os
 import requests
-from loglash import log
 
 CURRENT = "1.0.0"
 REPO    = "Soyibjon1/maktab"
 BRANCH  = "main"
-FILES   = ["Talaba.py", "client_agent.py", "updater.py"]
+FILES   = ["Talaba.py", "client_agent.py", "updater.py", "requrements.txt"]
 
-# Fayllar Talaba.py bilan bir papkada bo'ladi.
-# CWD (avtozagruzka) boshqa papkada bo'lishi mumkin,
-# shu sababli absolut yo'l ishlatamiz.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -36,5 +32,5 @@ def check_and_update() -> bool:
 
         return True
     except Exception as e:
-        log(f"[Updater] Xato: {e}")
+        print(f"[Updater] Xato: {e}")
         return False
