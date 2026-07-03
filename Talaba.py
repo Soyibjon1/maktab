@@ -75,7 +75,7 @@ class LoginFrame(ctk.CTkFrame):
         self.on_login = on_login
         wp = ctk.CTkLabel(self, text="", image=get_wallpaper(os.path.join(folder, "dark.png"), olcham))
         wp.place(x=0, y=0)
-        kard = ctk.CTkFrame(self, fg_color="#1e1e2e", corner_radius=20, width=420)
+        kard = ctk.CTkFrame(self, fg_color="#1e1e2e", corner_radius=20, width=420, bg_color="#4b3621")
         kard.place(relx=0.5, rely=0.5, anchor="center")
         kard.grid_propagate(False)
 
