@@ -70,11 +70,12 @@ def keyingi_rasm():
 
 class LoginFrame(ctk.CTkFrame):
     def __init__(self, master, on_login):
-        super().__init__(master, fg_color="#4b3621", corner_radius=0)
+        super().__init__(master, fg_color="#000000", corner_radius=0)
         self.place(relx=0, rely=0, relwidth=1, relheight=1)
         self.lift()
         self.on_login = on_login
-
+        wp = ctk.CTkLabel(self, text="", image=get_wallpaper(os.path.join(folder, "dark.png"), olcham))
+        wp.place(x=0, y=0)
         kard = ctk.CTkFrame(self, fg_color="#1e1e2e", corner_radius=20, width=420)
         kard.place(relx=0.5, rely=0.5, anchor="center")
         kard.grid_propagate(False)
@@ -107,7 +108,6 @@ class LoginFrame(ctk.CTkFrame):
             command=self._submit,
         ).pack(pady=(0, 32), padx=40)
 
-        pywinstyles.set_opacity(self, color="#4b3621")
 
     def _submit(self):
         name = self.entry.get().strip()
