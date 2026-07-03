@@ -70,7 +70,7 @@ def keyingi_rasm():
 
 class LoginFrame(ctk.CTkFrame):
     def __init__(self, master, on_login):
-        super().__init__(master, fg_color="#000000", corner_radius=0)
+        super().__init__(master, fg_color="#4b3621", corner_radius=0)
         self.place(relx=0, rely=0, relwidth=1, relheight=1)
         self.lift()
         self.on_login = on_login
