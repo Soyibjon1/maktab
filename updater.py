@@ -34,3 +34,6 @@ def check_and_update() -> bool:
     except Exception as e:
         print(f"[Updater] Xato: {e}")
         return False
+
+def log(a):
+    print(a)

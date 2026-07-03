@@ -24,13 +24,13 @@ agent = None
 # ---------------------------------------------------------------------------
 # KONSOL YASHIRISH
 # ---------------------------------------------------------------------------
-if platform.system() == "Windows":
-    try:
-        _hwnd = ctypes.windll.kernel32.GetConsoleWindow()
-        if _hwnd:
-            ctypes.windll.user32.ShowWindow(_hwnd, 0)
-    except Exception:
-        pass
+# if platform.system() == "Windows":
+#     try:
+#         _hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+#         if _hwnd:
+#             ctypes.windll.user32.ShowWindow(_hwnd, 0)
+#     except Exception:
+#         pass
 
 # ---------------------------------------------------------------------------
 # MA'LUMOTLAR MODELI
