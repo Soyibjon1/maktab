@@ -1,0 +1,14 @@
+# Talaba dasturi uchun kerakli kutubxonalar
+customtkinter>=6.0.0
+pillow>=10.0.0
+audioop-lts
+keyboard>=0.13.5
+pywin32>=306
+pywinstyles>=1.8
+requests>=2.31.0
+psutil>=5.9.0
+pydub>=0.25.1
+# winsound - Python bilan birga keladi (o'rnatish shart emas)
+# DIQQAT: pydub MP3 formatini o'qish uchun ffmpeg talab qiladi.
+# ffmpeg.exe ni yuklab, PATH ga qo'shish kerak: https://ffmpeg.org/download.html
+# Agar faqat WAV fayllar yuborilsa, ffmpeg shart emas.
