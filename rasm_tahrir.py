@@ -1,16 +1,3 @@
-"""
-rasm_tahrir.py — Ikonka va fon rasmlarini yuklash.
-
-IKONKA MUAMMOSI (bazi kompyuterlarda ko'rinmaydi):
-  win32gui.ExtractIconEx() ba'zi sistemalarda (yoki ba'zi exe turlari uchun)
-  bo'sh ro'yxat qaytaradi — masalan, UWP/Store ilovalar, Python skriptlar,
-  yoki ma'lum manifest formatidagi exe lar uchun. Shu sababli uchta
-  usul ketma-ket sinab ko'riladi:
-    1) win32gui.ExtractIconEx()        — standart pywin32 usuli
-    2) ctypes + SHGetFileInfo()        — Windows Shell API (pywin32 shart emas)
-    3) make_placeholder_icon()         — hech narsa ishlamasa, kulrang kvadrat
-"""
-
 import os
 import ctypes
 import ctypes.wintypes
@@ -23,8 +10,9 @@ try:
     import win32gui
     import win32ui
     PYWIN32_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     PYWIN32_AVAILABLE = False
+    print("Rasm Tahrir-1:",e)
 
 DEFAULT_ICON_SIZE = (35, 35)
 
@@ -60,9 +48,11 @@ def _extract_via_pywin32(exe_path: str, size=DEFAULT_ICON_SIZE) -> Optional[Imag
             try:
                 win32gui.DestroyIcon(h)
             except Exception:
+                print("Rasm Tahrir-2:", e)
                 pass
         return img.resize(size)
-    except Exception:
+    except Exception as e:
+        print("Rasm Tahrir-3:", e)
         return None
 
 
@@ -155,7 +145,8 @@ def _extract_via_ctypes(exe_path: str, size=DEFAULT_ICON_SIZE) -> Optional[Image
         user32.ReleaseDC(None, hdc_screen)
 
         return img.resize(size)
-    except Exception:
+    except Exception as e:
+        print("Rasm Tahrir-4:", e)
         return None
 
 
@@ -183,7 +174,8 @@ def get_program_icon(program) -> "ctk.CTkImage":
     if program.icon and os.path.exists(program.icon):
         try:
             img = Image.open(program.icon).convert("RGBA").resize(DEFAULT_ICON_SIZE)
-        except Exception:
+        except Exception as e:
+            print("Rasm Tahrir-5:", e)
             img = None
     if img is None:
         img = extract_icon_from_exe(program.path)
