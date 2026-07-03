@@ -107,6 +107,8 @@ class LoginFrame(ctk.CTkFrame):
             command=self._submit,
         ).pack(pady=(0, 32), padx=40)
 
+        pywinstyles.set_opacity(self, color="#4b3621")
+
     def _submit(self):
         name = self.entry.get().strip()
         if not name:
@@ -216,8 +218,9 @@ def _setup_program_grid():
         ctk.CTkLabel(
             _programs_frame,
             text="Ruxsat etilgan dasturlar topilmadi.",
-            font=("Arial", 22), text_color="white", bg_color="#4b3621",
+            font=("Arial", 22), text_color="white", bg_color="#4b3621",fg_color="#4b3621",
         ).pack(pady=30)
+
     else:
         columns = 4
         for idx, program in enumerate(allowed):
