@@ -31,13 +31,13 @@ agent = None
 # ---------------------------------------------------------------------------
 # KONSOL YASHIRISH
 # ---------------------------------------------------------------------------
-# if platform.system() == "Windows":
-#     try:
-#         _hwnd = ctypes.windll.kernel32.GetConsoleWindow()
-#         if _hwnd:
-#             ctypes.windll.user32.ShowWindow(_hwnd, 0)
-#     except Exception:
-#         pass
+if platform.system() == "Windows":
+    try:
+        _hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if _hwnd:
+            ctypes.windll.user32.ShowWindow(_hwnd, 0)
+    except Exception:
+        pass
 
 # ---------------------------------------------------------------------------
 # MA'LUMOTLAR MODELI
@@ -58,6 +58,7 @@ root = ctk.CTk()
 root.attributes("-fullscreen", True)
 root.attributes("-topmost", True)
 root.protocol("WM_DELETE_WINDOW", lambda: None)
+ctk.set_appearance_mode("dark")
 
 olcham = root.winfo_screenwidth(), root.winfo_screenheight()
 
