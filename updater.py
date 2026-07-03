@@ -1,5 +1,6 @@
 import os
 import requests
+from loglash import log
 
 CURRENT = "1.0.0"
 REPO    = "Soyibjon1/maktab"
@@ -35,5 +36,5 @@ def check_and_update() -> bool:
 
         return True
     except Exception as e:
-        print(f"[Updater] Xato: {e}")
+        log(f"[Updater] Xato: {e}")
         return False

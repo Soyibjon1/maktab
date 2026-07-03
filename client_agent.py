@@ -99,13 +99,32 @@ def run_command(cmd: str) -> tuple[str, str]:
 # ── Asosiy agent ─────────────────────────────────────────────
 
 class ClientAgent:
-    def __init__(self, reload=None, name: str = None, on_lower=None, on_update=None):
+    def __init__(self, reload=None, name: str = None, on_lower=None,
+                 on_update=None, on_audio=None, on_audio_control=None):
         self._sock = None
+        self._sock_lock = threading.Lock()
         self.reload = reload
         self.on_lower = on_lower
         self.on_update = on_update
+        self.on_audio = on_audio                   # (bytes, speed, fmt, start_at) -> None
+        self.on_audio_control = on_audio_control    # (action: str) -> None
         self._running = True
         self.name = name or CLIENT_NAME
+
+    def rename(self, new_name: str):
+        """
+        Talaba LoginFrame orqali ismini kiritganda chaqiriladi.
+        Serverga qayta "hello" xabarini yuborib, ko'rinadigan nomni
+        yangilaydi (server buni eski manzil bo'yicha yangilaydi).
+        """
+        self.name = new_name or self.name
+        with self._sock_lock:
+            sock = self._sock
+        if sock:
+            try:
+                send_msg(sock, json.dumps({"type": "hello", "name": self.name}))
+            except Exception as e:
+                print(f"[!] Nomni yangilashda xatolik: {e}")
 
     def run(self):
         print(f"[{self.name}] Agent ishga tushdi.")
@@ -122,7 +141,8 @@ class ClientAgent:
     def _connect_and_listen(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.connect((SERVER_HOST, SERVER_PORT))
-        self._sock = sock
+        with self._sock_lock:
+            self._sock = sock
         print(f"[✓] Serverga ulandi: {SERVER_HOST}:{SERVER_PORT}")
 
         # O'zini tanishtirish
@@ -165,6 +185,33 @@ class ClientAgent:
             elif xabar_turi == "update":
                 if self.on_update:
                     self.on_update()
+
+            elif xabar_turi == "audio_data":
+                # Audio faylni base64 formatida qabul qilish.
+                # delay_sec - "xabar qabul qilingandan necha soniya keyin
+                # boshlash kerak". Bu server/client soat farqidan MUSTAQIL
+                # ishlaydi (Unix timestamp solishtirish o'rniga nisbiy
+                # kechikish ishlatiladi) - barcha talabalar deyarli bir
+                # vaqtda xabarni oladi, shuning uchun bir xil kechikish
+                # bilan boshlash amalda sinxron eshitilishini ta'minlaydi.
+                if self.on_audio:
+                    import base64
+                    try:
+                        audio_bytes = base64.b64decode(msg.get("data", ""))
+                        speed = float(msg.get("speed", 1.0))
+                        fmt = msg.get("format", "mp3")
+                        delay_sec = float(msg.get("delay_sec", 0))
+                        self.on_audio(audio_bytes, speed, fmt, delay_sec)
+                    except Exception as e:
+                        print(f"[Audio] Qabul qilishda xatolik: {e}")
+
+            elif xabar_turi == "audio_control":
+                # action: "stop"/"pause"/"play". delay_sec - xuddi
+                # audio_data'dagi kabi, sinxron to'xtatish uchun.
+                if self.on_audio_control:
+                    action = msg.get("action", "stop")
+                    delay_sec = float(msg.get("delay_sec", 0))
+                    self.on_audio_control(action, delay_sec)
 
 
 

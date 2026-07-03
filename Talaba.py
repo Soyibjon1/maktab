@@ -12,14 +12,6 @@ import customtkinter as ctk
 import keyboard
 import pywinstyles
 
-# ---------------------------------------------------------------------------
-# BASE_DIR — barcha yo'llar shu papkaga nisbatan hisoblanadi.
-# Avtozagruzka (Task Scheduler, Run registry) ishga tushirganda
-# ishchi papka (CWD) boshqa joyda bo'lishi mumkin — shu sababli
-# Talaba.py joylashgan papkani aniqlab, CWD'ni o'sha yerga o'rnatamiz.
-# Shundan keyin config.json, fon/, rasm_tahrir.py va boshqa
-# nisbiy yo'llar hamma vaqt to'g'ri ishlaydi.
-# ---------------------------------------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
@@ -27,17 +19,18 @@ from client_agent import ClientAgent
 from rasm_tahrir import get_program_icon, get_wallpaper
 
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
-agent=None
+agent = None
 
-
+# ---------------------------------------------------------------------------
+# KONSOL YASHIRISH
+# ---------------------------------------------------------------------------
 if platform.system() == "Windows":
     try:
-        _console_hwnd = ctypes.windll.kernel32.GetConsoleWindow()
-        if _console_hwnd:
-            ctypes.windll.user32.ShowWindow(_console_hwnd, 0)  # SW_HIDE
+        _hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if _hwnd:
+            ctypes.windll.user32.ShowWindow(_hwnd, 0)
     except Exception:
         pass
-
 
 # ---------------------------------------------------------------------------
 # MA'LUMOTLAR MODELI
@@ -50,58 +43,107 @@ class ProgramEntry:
     allowed: bool = False
     icon: str = ""
 
-
 # ---------------------------------------------------------------------------
-# ASOSIY OYNA VA TALABA ISMINI SO'RASH
+# ASOSIY OYNA
 # ---------------------------------------------------------------------------
 
 root = ctk.CTk()
-
-root.deiconify()
 root.attributes("-fullscreen", True)
 root.attributes("-topmost", True)
+root.protocol("WM_DELETE_WINDOW", lambda: None)
 
 olcham = root.winfo_screenwidth(), root.winfo_screenheight()
 
-folder = "fon"
+folder = os.path.join(BASE_DIR, "fon")
 raslar = [
     os.path.join(folder, f) for f in os.listdir(folder)
     if os.path.splitext(f)[1].lower() in {".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp"}
 ]
-_rasm_aylanma = cycle(raslar) if raslar else cycle(["fon/dark.png"])
+_rasm_aylanma = cycle(raslar) if raslar else cycle([os.path.join(folder, "dark.png")])
 
-wp = ctk.CTkLabel(root, text="", image=get_wallpaper("fon/dark.png", olcham))
+wp = ctk.CTkLabel(root, text="", image=get_wallpaper(os.path.join(folder, "dark.png"), olcham))
 wp.place(x=0, y=0)
 
 
 def keyingi_rasm():
     return next(_rasm_aylanma)
 
+# ---------------------------------------------------------------------------
+# LOGIN FRAME — CTkInputDialog o'rniga
+# ---------------------------------------------------------------------------
+# CTkInputDialog asosiy oyna ochilmagan paytda ochilib, fon dasturlarga
+# kirish imkonini berardi. Bu LoginFrame esa asosiy oyna to'liq ekranda
+# va eng ustida bo'lganidan KEYIN, uning USTIDA ochiladi — talaba boshqa
+# oynalarga o'ta olmaydi.
+
+class LoginFrame(ctk.CTkFrame):
+    def __init__(self, master, on_login):
+        super().__init__(master, fg_color="#000000", corner_radius=0)
+        self.place(relx=0, rely=0, relwidth=1, relheight=1)
+        self.lift()
+        self.on_login = on_login
+
+        kard = ctk.CTkFrame(self, fg_color="#1e1e2e", corner_radius=20, width=420)
+        kard.place(relx=0.5, rely=0.5, anchor="center")
+        kard.grid_propagate(False)
+
+        ctk.CTkLabel(
+            kard, text="👋  Xush kelibsiz!",
+            font=ctk.CTkFont("Arial", 24, "bold"), text_color="#cdd6f4",
+        ).pack(pady=(32, 8))
+
+        ctk.CTkLabel(
+            kard, text="Ismingizni kiriting:",
+            font=ctk.CTkFont("Arial", 14), text_color="#a6adc8",
+        ).pack()
+
+        self.entry = ctk.CTkEntry(
+            kard, width=300, height=44,
+            font=ctk.CTkFont("Arial", 16),
+            placeholder_text="Ism Familiya",
+            justify="center",
+        )
+        self.entry.pack(pady=(12, 8), padx=40)
+        self.entry.bind("<Return>", lambda e: self._submit())
+        self.entry.focus()
+
+        ctk.CTkButton(
+            kard, text="Kirish", width=300, height=44,
+            font=ctk.CTkFont("Arial", 15, "bold"),
+            fg_color="#89b4fa", hover_color="#74c7ec",
+            text_color="#1e1e2e",
+            command=self._submit,
+        ).pack(pady=(0, 32), padx=40)
+
+    def _submit(self):
+        name = self.entry.get().strip()
+        if not name:
+            self.entry.configure(border_color="red")
+            return
+        self.destroy()
+        self.on_login(name)
 
 # ---------------------------------------------------------------------------
 # DASTUR ISHGA TUSHIRISH
 # ---------------------------------------------------------------------------
 
 def launch_program(program: ProgramEntry):
-    if not program.allowed:
-        return
-    if not os.path.exists(program.path):
-        print(f"Dastur topilmadi: {program.path}")
+    if not program.allowed or not os.path.exists(program.path):
         return
     try:
         subprocess.Popen([program.path])
-        root.lower()  # dastur ochilganda launcher doim orqaga o'tadi (ruxsat shart emas)
+        root.lower()
     except Exception as e:
         print(f"Dasturni ishga tushirishda xatolik: {e}")
 
-
 # ---------------------------------------------------------------------------
-# TUGMALARNI BLOKLASH / OGOHLANTIRISH
+# CHIQISH
 # ---------------------------------------------------------------------------
 
 def _do_exit():
     try:
-        agent.stop()
+        if agent:
+            agent.stop()
     except Exception:
         pass
     try:
@@ -114,55 +156,60 @@ def _do_exit():
         pass
     os._exit(0)
 
+# ---------------------------------------------------------------------------
+# KLAVIATURA CHEKLOVLARI
+# ---------------------------------------------------------------------------
+# MUAMMO (eski kod): keyboard.add_hotkey(..., suppress=True) global hook
+# o'rnatadi. Bu hook ba'zan kirill harflari, -, +, va boshqa tugmalar
+# bilan to'qnash kelib ularni "yutib yuboradi". Ayniqsa Win+tugmalar
+# Magnifier shortcut lari bilan chalkashishi mumkin.
+#
+# YECHIM: bitta tugma bloklash uchun block_key() ishlatiladi (eng past
+# darajali, boshqa tugmalarga xalaqit bermaydi). Kombinatsiyalar uchun
+# suppress=True faqat haqiqiy zarur joylarda qoldirildi. ALWAYS_ON
+# tugmalar uchun suppress=True UMUMAN ishlatilmaydi.
 
-def block_and_warn(combo):
-    if combo == "alt+f5":
-        wp.configure(image=get_wallpaper(keyingi_rasm(), olcham))
-        return
-    if combo == "ctrl+alt+shift+break":
-        root.after(0, _do_exit)
-        return
-    print(f"'{combo}' bloklangan - bu amal taqiqlangan!")
-
-
-root.protocol("WM_DELETE_WINDOW", lambda: block_and_warn("chiqish"))
-
-# Doim ishlaydigan, hech qachon bloklanmaydigan tugmalar:
-#   alt+f5               - fon rasmini almashtirish
-#   ctrl+alt+shift+break - admin uchun chiqish (kiosk rejimidan qat'iy nazar)
-ALWAYS_ON_KEYS = ("alt+f5", "ctrl+alt+shift+break")
-
-# SECURITY_KEYS - Win, Alt+Tab kabi xavfsizlik tugmalari (o'zgarishsiz qoladi)
-SECURITY_KEYS = ("windows", "alt+f4", "alt+tab", "ctrl+esc",
-                  "ctrl+alt+delete", "ctrl+shift+esc")
-
+ALWAYS_ON_KEYS = {
+    "alt+f5":               lambda: root.after(0, lambda: wp.configure(
+                                image=get_wallpaper(keyingi_rasm(), olcham))),
+    "ctrl+alt+shift+break": lambda: root.after(0, _do_exit),
+}
 
 def apply_key_restrictions(cfg: dict):
     keyboard.unhook_all()
 
-    # 1) Doim ishlaydigan tugmalar - kiosk holatidan qat'iy nazar
-    for combo in ALWAYS_ON_KEYS:
-        keyboard.add_hotkey(combo, lambda c=combo: block_and_warn(c), suppress=True)
+    # 1) Doim ishlaydigan tugmalar — suppress=True YO'Q (boshqa tugmalarga
+    #    xalaqit bermasligi uchun)
+    for combo, handler in ALWAYS_ON_KEYS.items():
+        keyboard.add_hotkey(combo, handler)
 
-    block_mode = cfg.get("block", False)
-
-    if not block_mode:
-        # Kiosk rejimi O'CHIRILGAN - xavfsizlik tugmalarining HECH BIRI
-        # bloklanmaydi, alohida sozlamalardan (win, alt_tab) qat'iy nazar
+    if not cfg.get("block", False):
+        # Kiosk rejimi o'chirilgan — hech narsa bloklanmaydi
         return
 
-    allow_win = cfg.get("win", False)
-    allow_alt_tab = cfg.get("alt_tab", False)
+    # 2) Win tugmasi — block_key() eng past darajali, xalaqit bermaydigan usul.
+    #    suppress=True ishlatilmaydi, shu sababli kirill/maxsus tugmalarga
+    #    ta'sir qilmaydi.
+    if not cfg.get("win", False):
+        try:
+            keyboard.block_key("left windows")
+            keyboard.block_key("right windows")
+        except Exception:
+            keyboard.add_hotkey("windows", lambda: None, suppress=True)
 
-    for combo in SECURITY_KEYS:
-        if combo == "windows" and allow_win:
-            continue  # ruxsat berilgan - bloklamaymiz
-        if combo == "alt+tab" and allow_alt_tab:
-            continue  # ruxsat berilgan - bloklamaymiz
-        keyboard.add_hotkey(combo, lambda c=combo: block_and_warn(c), suppress=True)
+    # 3) Alt+Tab — faqat shu kombinatsiya suppress bilan
+    if not cfg.get("alt_tab", False):
+        keyboard.add_hotkey("alt+tab", lambda: None, suppress=True)
+
+    # 4) Qolgan bloqlanishi kerak bo'lgan kombinatsiyalar
+    for combo in ("alt+f4", "ctrl+esc", "ctrl+shift+esc"):
+        keyboard.add_hotkey(combo, lambda: None, suppress=True)
+
+# ---------------------------------------------------------------------------
+# DASTURLAR PANELI
+# ---------------------------------------------------------------------------
 
 _programs_frame = None
-
 
 def _setup_program_grid():
     global _programs_frame
@@ -170,17 +217,13 @@ def _setup_program_grid():
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         raw = json.load(f)
 
-    # Oyna ko'rinishini boshqarish (kiosk rejimi yoqilgan/o'chirilganiga qarab)
     if raw.get("block"):
         root.deiconify()
     else:
         root.withdraw()
 
-    # Klaviatura cheklovlarini joriy konfiguratsiyaga mos ravishda
-    # to'liq qaytadan quramiz (bug-fix - yuqoridagi izohga qarang)
     apply_key_restrictions(raw)
 
-    # Eski panelni BUTUNLAY, BIR YO'LA o'chiramiz (agar mavjud bo'lsa)
     if _programs_frame is not None:
         _programs_frame.destroy()
 
@@ -188,41 +231,135 @@ def _setup_program_grid():
     _programs_frame.place(relx=0, rely=0, relwidth=1, relheight=1)
 
     dasturlar = [ProgramEntry(**item) for item in raw.get("programs", [])]
-    allowed_programs = [i for i in dasturlar if i.allowed]
+    allowed = [p for p in dasturlar if p.allowed]
 
-    if not allowed_programs:
-        t = ctk.CTkLabel(
+    if not allowed:
+        ctk.CTkLabel(
             _programs_frame,
             text="Ruxsat etilgan dasturlar topilmadi.",
-            font=("Arial", 22), text_color="white",
-            bg_color="#4b3621",
-        )
-        t.pack(pady=30)
-        return
+            font=("Arial", 22), text_color="white", bg_color="#4b3621",
+        ).pack(pady=30)
+    else:
+        columns = 4
+        for idx, program in enumerate(allowed):
+            col, row = divmod(idx, columns)
+            btn = ctk.CTkButton(
+                _programs_frame,
+                text=program.name,
+                image=get_program_icon(program),
+                compound="top",
+                width=50, height=50,
+                font=("Arial", 14),
+                fg_color="#4b3621", bg_color="#4b3621",
+                hover_color="#3b3b3b",
+                command=lambda p=program: launch_program(p),
+            )
+            btn.grid(row=row, column=col, padx=10, pady=10, sticky="nw")
 
-    columns = 4
-    for idx, program in enumerate(allowed_programs):
-        col, row = divmod(idx, columns)  # chap→o'ng, keyin pastga
-        icon = get_program_icon(program)
-
-        btn = ctk.CTkButton(
-            _programs_frame,
-            text=program.name,
-            image=icon,
-            compound="top",
-            width=50, height=50,
-            font=("Arial", 14),
-            fg_color="#4b3621",
-            bg_color="#4b3621",
-            hover_color="#3b3b3b",
-            command=lambda p=program: launch_program(p),
-        )
-        btn.grid(row=row, column=col, padx=10, pady=10, sticky="nw")
     pywinstyles.set_opacity(_programs_frame, color="#4b3621")
 
 
+def yangilash():
+    _setup_program_grid()
+
+# ---------------------------------------------------------------------------
+# AUDIO IJRO (serverdan kelgan audio)
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# AUDIO IJRO (serverdan kelgan audio)
+# ---------------------------------------------------------------------------
+# MUHIM: pygame O'RNIGA winsound ishlatiladi - bu Python bilan birga
+# keladigan STANDART kutubxona (hech narsa pip orqali o'rnatish shart
+# emas). pygame Python 3.14 uchun hali tayyor (prebuilt) wheel chiqarmagan
+# va manbadan build qilish uchun Visual C++ compiler talab qiladi - bu
+# talaba kompyuterlarida bo'lishi mumkin emas.
+#
+# CHEKLOV: winsound faqat WAV formatini ijro qiladi va haqiqiy "pauza"
+# funksiyasiga ega EMAS (faqat play/stop). Shu sababli:
+#   - MP3/boshqa formatlar avval WAV'ga aylantiriladi (pydub orqali,
+#     bu allaqachon tezlikni o'zgartirish uchun ishlatilgan edi)
+#   - "Pauza" o'rniga faqat "Stop" mavjud (serverdan audio_control
+#     "pause" kelsa, xuddi shu narsa - to'xtatish - bajariladi)
+
+import winsound
+
+_audio_temp = None
+
+
+def _play_audio(audio_bytes: bytes, speed: float, fmt: str, delay_sec: float = 0):
+    """
+    delay_sec - xabar qabul qilingandan necha soniya keyin ijro
+    boshlanishi kerak. Audio fayl OLDINDAN (kechikish paytida) tayyor
+    holga keltiriladi, shunda ijroning o'zi aniq delay_sec vaqtida
+    boshlanadi - fayl konvertatsiya vaqti sinxronlikni buzmaydi.
+    """
+    global _audio_temp
+    try:
+        import tempfile
+
+        if fmt.lower() == "wav" and speed == 1.0:
+            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            tmp.write(audio_bytes)
+            tmp.close()
+        else:
+            import io
+            from pydub import AudioSegment
+
+            sound = AudioSegment.from_file(io.BytesIO(audio_bytes), format=fmt)
+
+            if speed != 1.0:
+                sound = sound._spawn(sound.raw_data, overrides={
+                    "frame_rate": int(sound.frame_rate * speed)
+                })
+
+            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            sound.export(tmp.name, format="wav")
+            tmp.close()
+
+        if _audio_temp and os.path.exists(_audio_temp):
+            try:
+                os.remove(_audio_temp)
+            except Exception:
+                pass
+        _audio_temp = tmp.name
+
+        def _start_playback():
+            try:
+                winsound.PlaySound(_audio_temp, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            except Exception as e:
+                print(f"[Audio] Ijroda xatolik: {e}")
+
+        # Fayl allaqachon tayyor (yuqorida konvertatsiya qilindi) -
+        # endi faqat delay_sec kutib, ijroni boshlaymiz
+        root.after(max(0, int(delay_sec * 1000)), _start_playback)
+    except Exception as e:
+        print(f"[Audio] Tayyorlashda xatolik: {e}")
+
+
+def _control_audio(action: str, delay_sec: float = 0):
+    """delay_sec - buyruq qabul qilingandan necha soniya keyin bajarilishi
+    kerak (sinxron to'xtatish uchun, audio_data bilan bir xil mantiq)."""
+    def _do_stop():
+        try:
+            winsound.PlaySound(None, winsound.SND_PURGE)
+        except Exception:
+            pass
+
+    if action in ("pause", "stop"):
+        root.after(max(0, int(delay_sec * 1000)), _do_stop)
+    elif action == "play":
+        if _audio_temp and os.path.exists(_audio_temp):
+            try:
+                winsound.PlaySound(_audio_temp, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            except Exception:
+                pass
+
+# ---------------------------------------------------------------------------
+# UPDATER
+# ---------------------------------------------------------------------------
+
 def _do_update():
-    """Serverdan yangilash buyrug'i kelganda chaqiriladi."""
     from updater import check_and_update
     updated = check_and_update()
     if updated:
@@ -231,36 +368,40 @@ def _do_update():
     else:
         print("[Updater] Yangilanish yo'q yoki xato.")
 
-
-def yangilash():
-    """Serverdan yangi konfiguratsiya kelganda chaqiriladi."""
-    _setup_program_grid()
-
+# ---------------------------------------------------------------------------
+# ISHGA TUSHIRISH
+# ---------------------------------------------------------------------------
+# TARTIB (muhim!):
+#   1) BIRINCHI NAVBATDA serverga ulanamiz (fon threadida). Bu config.json
+#      dagi "block" qiymatidan QAT'IY NAZAR bajariladi - aks holda
+#      block=false bo'lganda LoginFrame umuman chiqmay, ustozga ulanish
+#      ham amalga oshmay qolardi.
+#   2) Server bilan aloqa fon threadida boshlangandan keyin, LoginFrame
+#      har doim ko'rsatiladi (talaba ismini kiritishi shart).
+#   3) Ism kiritilgach, agentga (allaqachon ishga tushgan) nomni beramiz
+#      va dasturlar panelini config.json ga mos holda quramiz (shu yerda
+#      "block" qiymatiga qarab oyna ko'rsatiladi yoki yashiriladi).
 
 _setup_program_grid()
 
+# Talaba kiritgan ism kelguncha vaqtinchalik nom bilan ulanamiz -
+# LoginFrame orqali ism kiritilgach, agent.name yangilanadi va
+# serverga xabar beriladi (rename orqali).
+agent = ClientAgent(
+    reload           = lambda: root.after(0, yangilash),
+    name             = platform.node() or "Noma'lum",
+    on_lower         = lambda: root.after(0, root.lower),
+    on_update        = lambda: Thread(target=_do_update, daemon=True).start(),
+    on_audio         = lambda b, s, f, d=0: root.after(0, _play_audio, b, s, f, d),
+    on_audio_control = lambda a, d=0: root.after(0, _control_audio, a, d),
+)
+Thread(target=agent.run, daemon=True).start()
 
-# ---------------------------------------------------------------------------
-# SERVERGA ULANISH (talaba kiritgan ism bilan)
-# ---------------------------------------------------------------------------
-def aloqa():
-    global agent
-    _ism_oynasi = ctk.CTkInputDialog(text="Ismingizni kiriting:", title="Talaba")
-    TALABA_ISMI = (_ism_oynasi.get_input() or "").strip() or platform.node() or "Noma'lum"
 
-    agent = ClientAgent(
-        reload=lambda: root.after(0, yangilash),
-        name=TALABA_ISMI,
-        on_lower=lambda: root.after(0, root.lower),
-        on_update=lambda: Thread(target=_do_update, daemon=True).start(),
-    )
-    Thread(target=agent.run, daemon=True).start()
-root.after(10, aloqa)
+def on_login(name: str):
+    agent.rename(name)
 
-# ---------------------------------------------------------------------------
-# F11 - DASTURNI ORQAGA TUSHIRISH (cheklovsiz, doim ishlaydi)
-# ---------------------------------------------------------------------------
 
+root.after(10, lambda: LoginFrame(root, on_login=on_login))
 root.bind("<F11>", lambda e: root.lower())
-
 root.mainloop()
