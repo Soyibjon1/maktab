@@ -6,13 +6,11 @@ import subprocess
 from dataclasses import dataclass
 from itertools import cycle
 from threading import Thread
-import time
 
 import customtkinter as ctk
 import keyboard
 import pywinstyles
 import ctypes
-import ctypes.wintypes
 
 ES_CONTINUOUS = 0x80000000
 ES_SYSTEM_REQUIRED = 0x00000001
@@ -155,11 +153,6 @@ def _do_exit():
     except Exception:
         pass
     try:
-        if _mouse_blocker is not None:
-            _mouse_blocker.stop()
-    except Exception:
-        pass
-    try:
         root.destroy()
     except Exception:
         pass
@@ -172,9 +165,7 @@ ALWAYS_ON_KEYS = {
 }
 
 def apply_key_restrictions(cfg: dict):
-    global _full_keyboard_blocked
     keyboard.unhook_all()
-    _full_keyboard_blocked = False
 
     # 1) Doim ishlaydigan tugmalar — suppress=True YO'Q (boshqa tugmalarga
     #    xalaqit bermasligi uchun)
@@ -182,9 +173,7 @@ def apply_key_restrictions(cfg: dict):
         keyboard.add_hotkey(combo, handler)
 
     if not cfg.get("block", False):
-        # Kiosk rejimi o'chirilgan — eski cheklovlarni tozalaymiz,
-        # ammo input_lock_* alohida yoqilgan bo'lsa, ularni ishlatamiz.
-        apply_input_locks(cfg)
+        # Kiosk rejimi o'chirilgan — hech narsa bloklanmaydi
         return
 
     # 2) Win tugmasi — block_key() eng past darajali, xalaqit bermaydigan usul.
@@ -204,207 +193,6 @@ def apply_key_restrictions(cfg: dict):
     # 4) Qolgan bloqlanishi kerak bo'lgan kombinatsiyalar
     for combo in ("alt+f4", "ctrl+esc", "ctrl+shift+esc"):
         keyboard.add_hotkey(combo, lambda: None, suppress=True)
-
-    # 5) Ustoz panelidan beriladigan to'liq input cheklovlari
-    apply_input_locks(cfg)
-
-
-# ---------------------------------------------------------------------------
-# KLAVIATURA / SICHQONCHA TO'LIQ CHEKLOVI
-# ---------------------------------------------------------------------------
-# Eslatma: bu cheklovlar faqat talaba agenti ishlayotgan Windows sessiyasida
-# ishlaydi. Ustoz config orqali qayta ochishi mumkin.
-
-_full_keyboard_blocked = False
-_mouse_blocker = None
-
-class MouseBlocker:
-    """Windows low-level mouse hook + ClipCursor.
-
-    Eski variant ba'zi Windows/Python 64-bit muhitlarida hook signaturasi sabab
-    ishlamasligi mumkin edi. Bu variant ikki qatlamli himoya qiladi:
-    1) WH_MOUSE_LL bilan click/harakat/wheel eventlarini yutadi;
-    2) ClipCursor bilan kursorni hozirgi joyida qamab qo'yadi.
-    """
-    WH_MOUSE_LL = 14
-    WM_QUIT = 0x0012
-    PM_REMOVE = 0x0001
-
-    class POINT(ctypes.Structure):
-        _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
-
-    class RECT(ctypes.Structure):
-        _fields_ = [
-            ("left", ctypes.c_long),
-            ("top", ctypes.c_long),
-            ("right", ctypes.c_long),
-            ("bottom", ctypes.c_long),
-        ]
-
-    def __init__(self):
-        self.user32 = ctypes.windll.user32
-        self.kernel32 = ctypes.windll.kernel32
-        self.hook_id = None
-        self.thread_id = None
-        self._thread = None
-        self._callback_ref = None
-        self._running = False
-        self._lock_point = None
-        self._prepare_winapi()
-
-    def _prepare_winapi(self):
-        # 64-bit Windows uchun aniq argtype/restype berish juda muhim.
-        self.user32.SetWindowsHookExW.argtypes = [
-            ctypes.c_int,
-            ctypes.c_void_p,
-            ctypes.wintypes.HINSTANCE,
-            ctypes.wintypes.DWORD,
-        ]
-        self.user32.SetWindowsHookExW.restype = ctypes.wintypes.HHOOK
-        self.user32.CallNextHookEx.argtypes = [
-            ctypes.wintypes.HHOOK,
-            ctypes.c_int,
-            ctypes.wintypes.WPARAM,
-            ctypes.wintypes.LPARAM,
-        ]
-        self.user32.CallNextHookEx.restype = ctypes.wintypes.LRESULT
-        self.user32.UnhookWindowsHookEx.argtypes = [ctypes.wintypes.HHOOK]
-        self.user32.UnhookWindowsHookEx.restype = ctypes.wintypes.BOOL
-        self.user32.PostThreadMessageW.argtypes = [
-            ctypes.wintypes.DWORD,
-            ctypes.wintypes.UINT,
-            ctypes.wintypes.WPARAM,
-            ctypes.wintypes.LPARAM,
-        ]
-        self.user32.PostThreadMessageW.restype = ctypes.wintypes.BOOL
-        self.user32.GetCursorPos.argtypes = [ctypes.POINTER(self.POINT)]
-        self.user32.GetCursorPos.restype = ctypes.wintypes.BOOL
-        self.user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
-        self.user32.SetCursorPos.restype = ctypes.wintypes.BOOL
-        self.user32.ClipCursor.argtypes = [ctypes.POINTER(self.RECT)]
-        self.user32.ClipCursor.restype = ctypes.wintypes.BOOL
-        self.kernel32.GetCurrentThreadId.restype = ctypes.wintypes.DWORD
-        self.kernel32.GetModuleHandleW.argtypes = [ctypes.wintypes.LPCWSTR]
-        self.kernel32.GetModuleHandleW.restype = ctypes.wintypes.HMODULE
-
-    def start(self):
-        if platform.system() != "Windows" or self._running:
-            return
-        self._running = True
-        self._lock_cursor_here()
-        try:
-            self.user32.ShowCursor(False)
-        except Exception:
-            pass
-        self._thread = Thread(target=self._run, daemon=True)
-        self._thread.start()
-
-    def stop(self):
-        self._running = False
-        self._release_cursor()
-        try:
-            self.user32.ShowCursor(True)
-        except Exception:
-            pass
-        if self.hook_id:
-            try:
-                self.user32.UnhookWindowsHookEx(self.hook_id)
-            except Exception:
-                pass
-            self.hook_id = None
-        if self.thread_id:
-            try:
-                self.user32.PostThreadMessageW(self.thread_id, self.WM_QUIT, 0, 0)
-            except Exception:
-                pass
-            self.thread_id = None
-
-    def _lock_cursor_here(self):
-        """Kursorni ayni joyida qamab qo'yadi. Hook ishlamasa ham harakat bloklanadi."""
-        try:
-            pt = self.POINT()
-            self.user32.GetCursorPos(ctypes.byref(pt))
-            self._lock_point = (int(pt.x), int(pt.y))
-            rect = self.RECT(pt.x, pt.y, pt.x + 1, pt.y + 1)
-            self.user32.ClipCursor(ctypes.byref(rect))
-            self.user32.SetCursorPos(pt.x, pt.y)
-        except Exception:
-            pass
-
-    def _release_cursor(self):
-        try:
-            self.user32.ClipCursor(None)
-        except Exception:
-            pass
-
-    def _run(self):
-        # LRESULT CALLBACK LowLevelMouseProc(int nCode, WPARAM wParam, LPARAM lParam)
-        CMPFUNC = ctypes.WINFUNCTYPE(
-            ctypes.wintypes.LRESULT,
-            ctypes.c_int,
-            ctypes.wintypes.WPARAM,
-            ctypes.wintypes.LPARAM,
-        )
-
-        def low_level_mouse_proc(nCode, wParam, lParam):
-            if nCode >= 0 and self._running:
-                # Mouse move, click, wheel — hammasini yutib yuboramiz.
-                return 1
-            return self.user32.CallNextHookEx(self.hook_id, nCode, wParam, lParam)
-
-        self._callback_ref = CMPFUNC(low_level_mouse_proc)
-        self.thread_id = self.kernel32.GetCurrentThreadId()
-        h_mod = self.kernel32.GetModuleHandleW(None)
-        self.hook_id = self.user32.SetWindowsHookExW(
-            self.WH_MOUSE_LL,
-            self._callback_ref,
-            h_mod,
-            0,
-        )
-
-        # Hook o'rnatilmasa ham ClipCursor ishlashi uchun sikl davom etadi.
-        msg = ctypes.wintypes.MSG()
-        while self._running:
-            # Kursor tashqi dastur tomonidan siljitilsa, qaytarib turamiz.
-            if self._lock_point:
-                try:
-                    self.user32.SetCursorPos(self._lock_point[0], self._lock_point[1])
-                except Exception:
-                    pass
-
-            # Xabarlar navbatini bloklamasdan tozalaymiz.
-            while self.user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, self.PM_REMOVE):
-                if msg.message == self.WM_QUIT:
-                    self._running = False
-                    break
-                self.user32.TranslateMessage(ctypes.byref(msg))
-                self.user32.DispatchMessageW(ctypes.byref(msg))
-            time.sleep(0.02)
-
-        self._release_cursor()
-
-
-def apply_input_locks(cfg: dict):
-    """Configdagi input_lock_keyboard/input_lock_mouse bo'yicha to'liq cheklovlarni yoqadi/o'chiradi."""
-    global _full_keyboard_blocked, _mouse_blocker
-
-    # Klaviatura: barcha tugmalarni yutib yuboradi.
-    if cfg.get("input_lock_keyboard", False):
-        if not _full_keyboard_blocked:
-            keyboard.hook(lambda event: None, suppress=True)
-            _full_keyboard_blocked = True
-    else:
-        _full_keyboard_blocked = False
-
-    # Sichqoncha: low-level hook orqali harakat/click/wheel bloklanadi.
-    if cfg.get("input_lock_mouse", False):
-        if _mouse_blocker is None:
-            _mouse_blocker = MouseBlocker()
-        _mouse_blocker.start()
-    else:
-        if _mouse_blocker is not None:
-            _mouse_blocker.stop()
-            _mouse_blocker = None
 
 # ---------------------------------------------------------------------------
 # DASTURLAR PANELI
