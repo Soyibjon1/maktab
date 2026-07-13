@@ -23,6 +23,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
 from client_agent import ClientAgent
+from mouse_lock import start_mouse_lock, stop_mouse_lock
 from rasm_tahrir import get_program_icon, get_wallpaper
 
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
@@ -75,6 +76,98 @@ wp.place(x=0, y=0)
 
 def keyingi_rasm():
     return next(_rasm_aylanma)
+
+class NameLabel(ctk.CTkFrame):
+    READONLY_COLOR = "#4b3621"   # fon bilan bir xil - "yashirin" ko'rinish uchun
+    EDIT_BG_COLOR = "#1e1e2e"    # standart tahrirlash foni
+    EDIT_TEXT_COLOR = "#cdd6f4"  # standart tahrirlash yozuv rangi
+    LONG_PRESS_MS = 2000         # necha millisekund bosib turish kerak
+
+    def __init__(self, master, initial_name: str, on_rename, **kwargs):
+        super().__init__(master, fg_color="transparent", **kwargs)
+        self.on_rename = on_rename
+        self._press_after_id = None
+
+        self.entry = ctk.CTkEntry(
+            self, width=220, height=34,
+            font=ctk.CTkFont("Arial", 22, "bold"),
+            justify="right",
+            state="readonly",
+        )
+        self.entry.pack()
+        self._set_value(initial_name)
+        self._apply_readonly_style()
+
+        # Sichqoncha CHAP tugmasi bosilganda - taymer boshlanadi (2 soniya)
+        self.entry.bind("<ButtonPress-1>", self._on_press)
+        self.entry.bind("<ButtonRelease-1>", self._on_release)
+        self.entry.bind("<Return>", lambda e: self._confirm_edit())
+        # Fokusdan chiqib ketsa ham (masalan boshqa joyga bossa) - qabul qilamiz
+        self.entry.bind("<FocusOut>", lambda e: self._confirm_edit())
+        pywinstyles.set_opacity(self, color="#4b3621")
+
+    # ------------------------------------------------------------------
+
+    def _set_value(self, text: str):
+        """Entry qiymatini state'dan qat'iy nazar yozadi (readonly bo'lsa
+        ham ichki qiymatni o'zgartirish uchun vaqtincha normal qilinadi)."""
+        prev_state = self.entry.cget("state")
+        self.entry.configure(state="normal")
+        self.entry.delete(0, "end")
+        self.entry.insert(0, text)
+        self.entry.configure(state=prev_state)
+
+    def _apply_readonly_style(self):
+        """Yashirin/label-kabi ko'rinish: barcha ranglar fon bilan bir xil."""
+        self.entry.configure(
+            state="readonly",
+            fg_color=self.READONLY_COLOR,
+            border_color=self.READONLY_COLOR,
+            text_color="white",
+        )
+
+    def _apply_edit_style(self):
+        """Tahrirlash holati: standart, ko'zga tashlanadigan ranglar."""
+        self.entry.configure(
+            state="normal",
+            fg_color=self.EDIT_BG_COLOR,
+            border_color="#89b4fa",
+            text_color=self.EDIT_TEXT_COLOR,
+        )
+
+    # ------------------------------------------------------------------
+
+    def _on_press(self, event=None):
+        # Agar allaqachon tahrirlash holatida bo'lsa - qayta taymer
+        # boshlash shart emas (foydalanuvchi matn ustida bosib, kursorni
+        # joylashtirmoqchi bo'lishi mumkin)
+        if str(self.entry.cget("state")) == "normal":
+            return
+        self._press_after_id = self.after(self.LONG_PRESS_MS, self._enter_edit_mode)
+
+    def _on_release(self, event=None):
+        # 2 soniyaga yetmasdan tugma qo'yib yuborilsa - taymerni bekor qilamiz
+        if self._press_after_id is not None:
+            self.after_cancel(self._press_after_id)
+            self._press_after_id = None
+
+    def _enter_edit_mode(self):
+        self._press_after_id = None
+        self._apply_edit_style()
+        self.entry.focus_set()
+        self.entry.select_range(0, "end")
+
+    def _confirm_edit(self):
+        if str(self.entry.cget("state")) != "normal":
+            return  # allaqachon readonly - qilinadigan ish yo'q
+        new_name = self.entry.get().strip()
+        if not new_name:
+            new_name = self.entry.get()  # bo'sh bo'lsa eski qiymat qoladi
+        self._set_value(new_name)
+        self._apply_readonly_style()
+        if new_name and self.on_rename:
+            self.on_rename(new_name)
+
 
 class LoginFrame(ctk.CTkFrame):
     def __init__(self, master, on_login):
@@ -144,6 +237,10 @@ def launch_program(program: ProgramEntry):
 
 def _do_exit():
     try:
+        stop_mouse_lock()
+    except Exception:
+        pass
+    try:
         if agent:
             agent.stop()
     except Exception:
@@ -162,6 +259,7 @@ ALWAYS_ON_KEYS = {
     "alt+f5":               lambda: root.after(0, lambda: wp.configure(
                                 image=get_wallpaper(keyingi_rasm(), olcham))),
     "ctrl+alt+shift+break": lambda: root.after(0, _do_exit),
+    "alt+shift": lambda: keyboard.press_and_release("alt+shift"),
 }
 
 def apply_key_restrictions(cfg: dict):
@@ -188,10 +286,10 @@ def apply_key_restrictions(cfg: dict):
 
     # 3) Alt+Tab — faqat shu kombinatsiya suppress bilan
     if not cfg.get("alt_tab", False):
-        keyboard.add_hotkey("alt+tab", lambda: None, suppress=True)
+        keyboard.add_hotkey("tab", lambda: None, suppress=True)
 
     # 4) Qolgan bloqlanishi kerak bo'lgan kombinatsiyalar
-    for combo in ("alt+f4", "ctrl+esc", "ctrl+shift+esc"):
+    for combo in ("ctrl+esc", "ctrl+shift+esc"):
         keyboard.add_hotkey(combo, lambda: None, suppress=True)
 
 # ---------------------------------------------------------------------------
@@ -212,6 +310,10 @@ def _setup_program_grid():
         root.withdraw()
 
     apply_key_restrictions(raw)
+    if raw.get("input_lock_mouse", False):
+        start_mouse_lock()
+    else:
+        stop_mouse_lock()
 
     if _programs_frame is not None:
         _programs_frame.destroy()
@@ -250,7 +352,12 @@ def _setup_program_grid():
 
 
 def yangilash():
+    global _name_label
     _setup_program_grid()
+    # _programs_frame qayta yaratilgani uchun, _name_label undan pastda
+    # qolib ketmasligi uchun har safar qaytadan tepaga chiqaramiz
+    if _name_label is not None:
+        _name_label.lift()
 
 import winsound
 
@@ -258,12 +365,6 @@ _audio_temp = None
 
 
 def _play_audio(audio_bytes: bytes, speed: float, fmt: str, delay_sec: float = 0):
-    """
-    delay_sec - xabar qabul qilingandan necha soniya keyin ijro
-    boshlanishi kerak. Audio fayl OLDINDAN (kechikish paytida) tayyor
-    holga keltiriladi, shunda ijroning o'zi aniq delay_sec vaqtida
-    boshlanadi - fayl konvertatsiya vaqti sinxronlikni buzmaydi.
-    """
     global _audio_temp
     try:
         import tempfile
@@ -337,26 +438,8 @@ def _do_update():
         os.execv(sys.executable, [sys.executable] + sys.argv)
     else:
         print("[Updater] Yangilanish yo'q yoki xato.")
-
-# ---------------------------------------------------------------------------
-# ISHGA TUSHIRISH
-# ---------------------------------------------------------------------------
-# TARTIB (muhim!):
-#   1) BIRINCHI NAVBATDA serverga ulanamiz (fon threadida). Bu config.json
-#      dagi "block" qiymatidan QAT'IY NAZAR bajariladi - aks holda
-#      block=false bo'lganda LoginFrame umuman chiqmay, ustozga ulanish
-#      ham amalga oshmay qolardi.
-#   2) Server bilan aloqa fon threadida boshlangandan keyin, LoginFrame
-#      har doim ko'rsatiladi (talaba ismini kiritishi shart).
-#   3) Ism kiritilgach, agentga (allaqachon ishga tushgan) nomni beramiz
-#      va dasturlar panelini config.json ga mos holda quramiz (shu yerda
-#      "block" qiymatiga qarab oyna ko'rsatiladi yoki yashiriladi).
-
 _setup_program_grid()
 
-# Talaba kiritgan ism kelguncha vaqtinchalik nom bilan ulanamiz -
-# LoginFrame orqali ism kiritilgach, agent.name yangilanadi va
-# serverga xabar beriladi (rename orqali).
 agent = ClientAgent(
     reload           = lambda: root.after(0, yangilash),
     name             = platform.node() or "Noma'lum",
@@ -370,7 +453,22 @@ Thread(target=agent.run, daemon=True).start()
 
 def on_login(name: str):
     agent.rename(name)
+    _show_name_label(name)
 
+
+def _show_name_label(name: str):
+
+    global _name_label
+    if _name_label is not None:
+        _name_label.destroy()
+    _name_label = NameLabel(
+        root, initial_name=name,
+        on_rename=lambda new_name: agent.rename(new_name) if agent else None,
+    )
+    _name_label.place(relx=1.0, y=10, x=-10, anchor="ne")
+
+
+_name_label = None
 
 root.after(10, lambda: LoginFrame(root, on_login=on_login))
 root.bind("<F11>", lambda e: root.lower())
