@@ -45,3 +45,5 @@ def check_and_update() -> bool:
         print(f"[Updater] Xato-2: {e}")
         return False
 
+if __name__ == "__main__":
+    update()
