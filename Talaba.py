@@ -132,6 +132,7 @@ class NameLabel(ctk.CTkFrame):
             state="readonly",
             fg_color=self.READONLY_COLOR,
             border_color=self.READONLY_COLOR,
+            bg_color=self.READONLY_COLOR,
             text_color="white",
         )
 
