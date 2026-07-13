@@ -16,6 +16,17 @@ except Exception as e:
     print(f"[Updater] Xato-1: {e}")
     CURRENT = "1.0.0"
 
+def update():
+    for filename in FILES:
+        r = requests.get(
+            f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/{filename}",
+            timeout=10,
+        )
+        r.raise_for_status()
+        path = os.path.join(BASE_DIR, filename)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(r.text)
+
 def check_and_update() -> bool:
     try:
         r = requests.get(
@@ -27,20 +38,10 @@ def check_and_update() -> bool:
             print(f"Yagilanihs mavjud emas {r.text.strip()}:{CURRENT}")
             return False
 
-        for filename in FILES:
-            r = requests.get(
-                f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/{filename}",
-                timeout=10,
-            )
-            r.raise_for_status()
-            path = os.path.join(BASE_DIR, filename)
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(r.text)
+        update()
 
         return True
     except Exception as e:
         print(f"[Updater] Xato-2: {e}")
         return False
 
-def log(a):
-    print(a)
