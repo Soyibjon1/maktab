@@ -1,4 +1,13 @@
 import os
+def _do_update():
+    from updater import check_and_update
+    updated = check_and_update()
+    if updated:
+        print("[Updater] Yangilandi, qayta ishga tushirilmoqda...")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    else:
+        print("[Updater] Yangilanish yo'q yoki xato.")
+_do_update()
 import sys
 import json
 import platform
@@ -354,8 +363,6 @@ def _setup_program_grid():
 def yangilash():
     global _name_label
     _setup_program_grid()
-    # _programs_frame qayta yaratilgani uchun, _name_label undan pastda
-    # qolib ketmasligi uchun har safar qaytadan tepaga chiqaramiz
     if _name_label is not None:
         _name_label.lift()
 
@@ -429,15 +436,6 @@ def _control_audio(action: str, delay_sec: float = 0):
 # ---------------------------------------------------------------------------
 # UPDATER
 # ---------------------------------------------------------------------------
-
-def _do_update():
-    from updater import check_and_update
-    updated = check_and_update()
-    if updated:
-        print("[Updater] Yangilandi, qayta ishga tushirilmoqda...")
-        os.execv(sys.executable, [sys.executable] + sys.argv)
-    else:
-        print("[Updater] Yangilanish yo'q yoki xato.")
 _setup_program_grid()
 
 agent = ClientAgent(
