@@ -1,13 +1,4 @@
 import os
-def _do_update():
-    from updater import check_and_update
-    updated = check_and_update()
-    if updated:
-        print("[Updater] Yangilandi, qayta ishga tushirilmoqda...")
-        os.execv(sys.executable, [sys.executable] + sys.argv)
-    else:
-        print("[Updater] Yangilanish yo'q yoki xato.")
-_do_update()
 import sys
 import json
 import platform
@@ -34,6 +25,7 @@ os.chdir(BASE_DIR)
 from client_agent import ClientAgent
 from mouse_lock import start_mouse_lock, stop_mouse_lock
 from rasm_tahrir import get_program_icon, get_wallpaper
+from screen_share import StudentScreenShareViewer
 
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 agent = None
@@ -370,6 +362,22 @@ def yangilash():
 import winsound
 
 _audio_temp = None
+_screen_viewer = None
+
+
+def _handle_screen_share(action: str, host: str, port: int):
+    """Ustozdan kelgan screen_share start/stop xabarini bajaradi."""
+    global _screen_viewer
+    try:
+        if _screen_viewer is None:
+            _screen_viewer = StudentScreenShareViewer(root)
+
+        if action == "stop":
+            _screen_viewer.stop()
+        else:
+            _screen_viewer.start(host, port)
+    except Exception as e:
+        print(f"[ScreenShare] Xatolik: {e}")
 
 
 def _play_audio(audio_bytes: bytes, speed: float, fmt: str, delay_sec: float = 0):
@@ -446,6 +454,7 @@ agent = ClientAgent(
     on_update        = lambda: Thread(target=_do_update, daemon=True).start(),
     on_audio         = lambda b, s, f, d=0: root.after(0, _play_audio, b, s, f, d),
     on_audio_control = lambda a, d=0: root.after(0, _control_audio, a, d),
+    on_screen_share  = lambda a, h, p: root.after(0, _handle_screen_share, a, h, p),
 )
 Thread(target=agent.run, daemon=True).start()
 

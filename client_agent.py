@@ -100,7 +100,8 @@ def run_command(cmd: str) -> tuple[str, str]:
 
 class ClientAgent:
     def __init__(self, reload=None, name: str = None, on_lower=None,
-                 on_update=None, on_audio=None, on_audio_control=None):
+                 on_update=None, on_audio=None, on_audio_control=None,
+                 on_screen_share=None):
         self._sock = None
         self._sock_lock = threading.Lock()
         self.reload = reload
@@ -108,6 +109,7 @@ class ClientAgent:
         self.on_update = on_update
         self.on_audio = on_audio                   # (bytes, speed, fmt, start_at) -> None
         self.on_audio_control = on_audio_control    # (action: str) -> None
+        self.on_screen_share = on_screen_share      # (action, host, port) -> None
         self._running = True
         self.name = name or CLIENT_NAME
 
@@ -212,6 +214,18 @@ class ClientAgent:
                     action = msg.get("action", "stop")
                     delay_sec = float(msg.get("delay_sec", 0))
                     self.on_audio_control(action, delay_sec)
+
+            elif xabar_turi == "screen_share":
+                # Ustoz ekranini alohida stream portdan ko'rsatish.
+                # host bo'sh kelsa, agent ulangan SERVER_HOST ishlatiladi.
+                if self.on_screen_share:
+                    action = msg.get("action", "start")
+                    host = msg.get("host") or SERVER_HOST
+                    try:
+                        port = int(msg.get("port", 3480))
+                    except Exception:
+                        port = 3480
+                    self.on_screen_share(action, host, port)
 
 
 
