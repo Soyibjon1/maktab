@@ -4,7 +4,7 @@ import requests
 
 REPO    = "Soyibjon1/maktab"
 BRANCH  = "main"
-FILES   = ["Talaba.py", "client_agent.py", "updater.py", "rasm_tahrir.py", "mouse_lock.py", "requirements.txt", 'version.txt']
+FILES   = ["Talaba.py", "client_agent.py", "updater.py", "rasm_tahrir.py", "screen_share.py", "mouse_lock.py", "requirements.txt", 'version.txt']
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
