@@ -1,19 +1,4 @@
-"""
-screen_share.py — Talaba tomonida ustoz ekranini ko'rsatish oynasi.
-
-Xususiyatlar:
-  - topmost oyna;
-  - o'quvchi oynani oddiy X bilan yopa olmaydi;
-  - oynani tepa panelidan sudrab o'ngga/chapga/pastga/tepaga ko'chirish mumkin;
-  - past-o'ng burchakdagi tutqichdan oynani katta/kichik qilish mumkin;
-  - □ tugmasi katta/kichik holatga o'tkazadi;
-  - X tugmasi ko'rinadi, lekin yopmaydi;
-  - ustoz stop yuborgandagina oyna yopiladi;
-  - rasm chizishni navbatda ko'paytirib yubormaslik uchun render throttling qo'shilgan.
-"""
-
 from __future__ import annotations
-
 import io
 import socket
 import threading
@@ -120,18 +105,18 @@ class StudentScreenShareViewer:
         button_box.pack(side="right", fill="y")
 
         # _ tugmasi: haqiqiy minimizatsiya emas, kichik oynaga qaytaradi.
-        btn_small = tk.Button(
-            button_box,
-            text="—",
-            width=4,
-            bd=0,
-            bg="#2b2b2b",
-            fg="white",
-            activebackground="#3a3a3a",
-            activeforeground="white",
-            command=self._set_small_geometry,
-        )
-        btn_small.pack(side="left", fill="y")
+        # btn_small = tk.Button(
+        #     button_box,
+        #     text="—",
+        #     width=4,
+        #     bd=0,
+        #     bg="#2b2b2b",
+        #     fg="white",
+        #     activebackground="#3a3a3a",
+        #     activeforeground="white",
+        #     command=self._set_small_geometry,
+        # )
+        # btn_small.pack(side="left", fill="y")
 
         btn_toggle = tk.Button(
             button_box,
@@ -146,19 +131,19 @@ class StudentScreenShareViewer:
         )
         btn_toggle.pack(side="left", fill="y")
 
-        # X ko'rinadi, lekin oyna yopilmaydi.
-        btn_close = tk.Button(
-            button_box,
-            text="×",
-            width=4,
-            bd=0,
-            bg="#3a1f1f",
-            fg="white",
-            activebackground="#5a2a2a",
-            activeforeground="white",
-            command=self._fake_close,
-        )
-        btn_close.pack(side="left", fill="y")
+        # # X ko'rinadi, lekin oyna yopilmaydi.
+        # btn_close = tk.Button(
+        #     button_box,
+        #     text="×",
+        #     width=4,
+        #     bd=0,
+        #     bg="#3a1f1f",
+        #     fg="white",
+        #     activebackground="#5a2a2a",
+        #     activeforeground="white",
+        #     command=self._fake_close,
+        # )
+        # btn_close.pack(side="left", fill="y")
 
         body = tk.Frame(outer, bg="black")
         body.pack(fill="both", expand=True)
