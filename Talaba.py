@@ -1,11 +1,24 @@
 import os
+from threading import Thread
+def _do_update():
+    from updater import check_and_update
+    updated = check_and_update()
+    if updated:
+        print("[Updater] Yangilandi, qayta ishga tushirilmoqda...")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    else:
+        print("[Updater] Yangilanish yo'q yoki xato.")
+try:
+    Thread(target=_do_update).start()
+except Exception as e:
+    print("Yangilanishda xatolik:",e)
+
 import sys
 import json
 import platform
 import subprocess
 from dataclasses import dataclass
 from itertools import cycle
-from threading import Thread
 
 import customtkinter as ctk
 import keyboard
