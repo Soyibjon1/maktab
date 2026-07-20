@@ -1,5 +1,4 @@
 import os
-from threading import Thread
 def _do_update():
     from updater import check_and_update
     updated = check_and_update()
@@ -8,17 +7,14 @@ def _do_update():
         os.execv(sys.executable, [sys.executable] + sys.argv)
     else:
         print("[Updater] Yangilanish yo'q yoki xato.")
-try:
-    Thread(target=_do_update).start()
-except Exception as e:
-    print("Yangilanishda xatolik:",e)
-
+_do_update()
 import sys
 import json
 import platform
 import subprocess
 from dataclasses import dataclass
 from itertools import cycle
+from threading import Thread
 
 import customtkinter as ctk
 import keyboard
@@ -35,13 +31,15 @@ ctypes.windll.kernel32.SetThreadExecutionState(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
-from client_agent import ClientAgent
+from client_agent import ClientAgent, SERVER_HOST
 from mouse_lock import start_mouse_lock, stop_mouse_lock
 from rasm_tahrir import get_program_icon, get_wallpaper
 from screen_share import StudentScreenShareViewer
+from voice_radio import StudentVoiceRadioClient
 
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 agent = None
+_voice_radio = None
 
 # ---------------------------------------------------------------------------
 # KONSOL YASHIRISH
@@ -261,6 +259,11 @@ def _do_exit():
     except Exception:
         pass
     try:
+        if _voice_radio:
+            _voice_radio.stop()
+    except Exception:
+        pass
+    try:
         keyboard.unhook_all()
     except Exception:
         pass
@@ -277,6 +280,21 @@ ALWAYS_ON_KEYS = {
     "alt+shift": lambda: keyboard.press_and_release("alt+shift"),
 }
 
+def _register_voice_radio_hotkeys():
+    """F9 push-to-talk har doim qayta ulanib turishi uchun.
+
+    apply_key_restrictions() ichida keyboard.unhook_all() ishlatilgani sababli
+    F9 hooklarini ham shu joydan qayta qo'shamiz.
+    """
+    if _voice_radio is None:
+        return
+    try:
+        keyboard.on_press_key("f9", lambda e: _voice_radio.start_talk(), suppress=False)
+        keyboard.on_release_key("f9", lambda e: _voice_radio.stop_talk(), suppress=False)
+    except Exception as e:
+        print(f"[Ratsiya] F9 hotkey ulanmadi: {e}")
+
+
 def apply_key_restrictions(cfg: dict):
     keyboard.unhook_all()
 
@@ -284,6 +302,8 @@ def apply_key_restrictions(cfg: dict):
     #    xalaqit bermasligi uchun)
     for combo, handler in ALWAYS_ON_KEYS.items():
         keyboard.add_hotkey(combo, handler)
+
+    _register_voice_radio_hotkeys()
 
     if not cfg.get("block", False):
         # Kiosk rejimi o'chirilgan — hech narsa bloklanmaydi
@@ -456,6 +476,17 @@ def _control_audio(action: str, delay_sec: float = 0):
                 pass
 
 # ---------------------------------------------------------------------------
+# RATSİYA
+# ---------------------------------------------------------------------------
+_voice_radio = StudentVoiceRadioClient(
+    root,
+    host=SERVER_HOST,
+    port=3490,
+    name=platform.node() or "Noma'lum",
+)
+_voice_radio.start()
+
+# ---------------------------------------------------------------------------
 # UPDATER
 # ---------------------------------------------------------------------------
 _setup_program_grid()
@@ -474,6 +505,8 @@ Thread(target=agent.run, daemon=True).start()
 
 def on_login(name: str):
     agent.rename(name)
+    if _voice_radio:
+        _voice_radio.rename(name)
     _show_name_label(name)
 
 
@@ -484,7 +517,7 @@ def _show_name_label(name: str):
         _name_label.destroy()
     _name_label = NameLabel(
         root, initial_name=name,
-        on_rename=lambda new_name: agent.rename(new_name) if agent else None,
+        on_rename=lambda new_name: (agent.rename(new_name) if agent else None, _voice_radio.rename(new_name) if _voice_radio else None),
     )
     _name_label.place(relx=1.0, y=10, x=-10, anchor="ne")
 

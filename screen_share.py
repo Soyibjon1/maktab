@@ -1,4 +1,19 @@
+"""
+screen_share.py — Talaba tomonida ustoz ekranini ko'rsatish oynasi.
+
+Xususiyatlar:
+  - topmost oyna;
+  - o'quvchi oynani oddiy X bilan yopa olmaydi;
+  - oynani tepa panelidan sudrab o'ngga/chapga/pastga/tepaga ko'chirish mumkin;
+  - past-o'ng burchakdagi tutqichdan oynani proportsional katta/kichik qilish mumkin;
+  - □ tugmasi katta/kichik holatga o'tkazadi;
+  - keraksiz — va X tugmalari olib tashlangan;
+  - ustoz stop yuborgandagina oyna yopiladi;
+  - rasm chizishni navbatda ko'paytirib yubormaslik uchun render throttling qo'shilgan.
+"""
+
 from __future__ import annotations
+
 import io
 import socket
 import threading
@@ -26,6 +41,8 @@ class StudentScreenShareViewer:
         self._normal_geometry: str | None = None
         self._host = ""
         self._port = 3480
+        self._source_aspect = 16 / 9
+        self._title_height = 34
 
         # Sudrash/resize uchun vaqtinchalik qiymatlar
         self._drag_start_x = 0
@@ -87,13 +104,13 @@ class StudentScreenShareViewer:
         outer = tk.Frame(win, bg="#111111", bd=1, relief="solid")
         outer.pack(fill="both", expand=True)
 
-        self.title_bar = tk.Frame(outer, bg="#202020", height=34, cursor="fleur")
+        self.title_bar = tk.Frame(outer, bg="#202020", height=self._title_height, cursor="fleur")
         self.title_bar.pack(fill="x", side="top")
         self.title_bar.pack_propagate(False)
 
         title = tk.Label(
             self.title_bar,
-            text="  Ustoz ekrani  •  tepa qismidan sudrab joyini almashtiring",
+            text="  Ustoz ekrani  •  sudrash va past-o'ngdan proportsional o'lcham",
             bg="#202020",
             fg="white",
             anchor="w",
@@ -103,20 +120,6 @@ class StudentScreenShareViewer:
 
         button_box = tk.Frame(self.title_bar, bg="#202020")
         button_box.pack(side="right", fill="y")
-
-        # _ tugmasi: haqiqiy minimizatsiya emas, kichik oynaga qaytaradi.
-        # btn_small = tk.Button(
-        #     button_box,
-        #     text="—",
-        #     width=4,
-        #     bd=0,
-        #     bg="#2b2b2b",
-        #     fg="white",
-        #     activebackground="#3a3a3a",
-        #     activeforeground="white",
-        #     command=self._set_small_geometry,
-        # )
-        # btn_small.pack(side="left", fill="y")
 
         btn_toggle = tk.Button(
             button_box,
@@ -130,20 +133,6 @@ class StudentScreenShareViewer:
             command=self._toggle_size,
         )
         btn_toggle.pack(side="left", fill="y")
-
-        # # X ko'rinadi, lekin oyna yopilmaydi.
-        # btn_close = tk.Button(
-        #     button_box,
-        #     text="×",
-        #     width=4,
-        #     bd=0,
-        #     bg="#3a1f1f",
-        #     fg="white",
-        #     activebackground="#5a2a2a",
-        #     activeforeground="white",
-        #     command=self._fake_close,
-        # )
-        # btn_close.pack(side="left", fill="y")
 
         body = tk.Frame(outer, bg="black")
         body.pack(fill="both", expand=True)
@@ -180,12 +169,42 @@ class StudentScreenShareViewer:
         self._set_small_geometry()
         win.lift()
 
+    def _content_height_for_width(self, width: int) -> int:
+        aspect = self._source_aspect or (16 / 9)
+        return max(1, int(width / aspect))
+
+    def _total_height_for_width(self, width: int) -> int:
+        return self._title_height + self._content_height_for_width(width)
+
+    def _clamp_proportional_size(self, desired_w: int, x: int = 0, y: int = 0) -> tuple[int, int]:
+        if not self.window:
+            return self.MIN_WIDTH, self.MIN_HEIGHT
+        sw = self.root.winfo_screenwidth()
+        sh = self.root.winfo_screenheight()
+        max_w = max(self.MIN_WIDTH, sw - max(0, x))
+        max_h = max(self.MIN_HEIGHT, sh - max(0, y))
+        max_w_by_h = int(max(1, (max_h - self._title_height)) * (self._source_aspect or (16 / 9)))
+        width = max(self.MIN_WIDTH, min(int(desired_w), max_w, max_w_by_h))
+        height = self._total_height_for_width(width)
+        return width, height
+
+    def _fit_current_geometry_to_aspect(self):
+        if not self.window or not self.window.winfo_exists() or self._large:
+            return
+        x = self.window.winfo_x()
+        y = self.window.winfo_y()
+        current_w = max(self.MIN_WIDTH, self.window.winfo_width())
+        new_w, new_h = self._clamp_proportional_size(current_w, x, y)
+        self.window.geometry(f"{new_w}x{new_h}+{x}+{y}")
+        self._normal_geometry = self.window.geometry()
+        self._schedule_redraw(delay_ms=20)
+
     def _set_small_geometry(self):
         if not self.window:
             return
         sw = self.root.winfo_screenwidth()
         width = min(640, max(420, sw // 3))
-        height = int(width * 9 / 16) + 34
+        height = self._total_height_for_width(width)
         x = max(0, sw - width - 18)
         y = 18
         self.window.geometry(f"{width}x{height}+{x}+{y}")
@@ -276,19 +295,34 @@ class StudentScreenShareViewer:
     def _resize_window(self, event):
         if not self.window:
             return "break"
+        if self._large:
+            self._restore_normal_geometry()
+            self.window.update_idletasks()
+
         dx = event.x_root - self._resize_start_x
         dy = event.y_root - self._resize_start_y
-        sw = self.root.winfo_screenwidth()
-        sh = self.root.winfo_screenheight()
         x = self.window.winfo_x()
         y = self.window.winfo_y()
 
-        new_w = max(self.MIN_WIDTH, min(self._resize_start_w + dx, sw - x))
-        new_h = max(self.MIN_HEIGHT, min(self._resize_start_h + dy, sh - y))
+        # O'lcham faqat bitta nisbatda o'zgaradi: content maydoni
+        # ustoz ekrani aspect ratio'siga moslanadi. Shu sababli rasm atrofida
+        # ortiqcha bo'sh joy paydo bo'lmaydi.
+        aspect = self._source_aspect or (16 / 9)
+        width_from_dx = self._resize_start_w + dx
+        # event y bo'yicha tortilsa ham eniga aylantiramiz, titlebar hisobga olinadi.
+        content_h_from_dy = max(1, (self._resize_start_h - self._title_height) + dy)
+        width_from_dy = int(content_h_from_dy * aspect)
+
+        if abs(dy) > abs(dx):
+            desired_w = width_from_dy
+        else:
+            desired_w = width_from_dx
+
+        new_w, new_h = self._clamp_proportional_size(desired_w, x, y)
         self.window.geometry(f"{int(new_w)}x{int(new_h)}+{x}+{y}")
         self._normal_geometry = self.window.geometry()
         self._large = False
-        self._schedule_redraw(delay_ms=80)
+        self._schedule_redraw(delay_ms=60)
         return "break"
 
     def _on_configure(self, event=None):
@@ -361,6 +395,11 @@ class StudentScreenShareViewer:
                         raise ConnectionError("frame qabul qilinmadi")
 
                     img = Image.open(io.BytesIO(data)).convert("RGB")
+                    if img.height:
+                        new_aspect = max(0.2, min(5.0, img.width / img.height))
+                        if abs(new_aspect - self._source_aspect) > 0.01:
+                            self._source_aspect = new_aspect
+                            self.root.after(0, self._fit_current_geometry_to_aspect)
                     with self._image_lock:
                         self._last_image = img
                     self._request_render()

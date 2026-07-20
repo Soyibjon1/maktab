@@ -12,3 +12,6 @@ pydub>=0.25.1
 # DIQQAT: pydub MP3 formatini o'qish uchun ffmpeg talab qiladi.
 # ffmpeg.exe ni yuklab, PATH ga qo'shish kerak: https://ffmpeg.org/download.html
 # Agar faqat WAV fayllar yuborilsa, ffmpeg shart emas.
+
+sounddevice>=0.4.6
+numpy>=1.24.0
