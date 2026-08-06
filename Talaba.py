@@ -1,4 +1,5 @@
 import os
+from threading import Thread
 def _do_update():
     from updater import check_and_update
     updated = check_and_update()
@@ -7,14 +8,13 @@ def _do_update():
         os.execv(sys.executable, [sys.executable] + sys.argv)
     else:
         print("[Updater] Yangilanish yo'q yoki xato.")
-_do_update()
+Thread(target=_do_update).start()
 import sys
 import json
 import platform
 import subprocess
 from dataclasses import dataclass
 from itertools import cycle
-from threading import Thread
 
 import customtkinter as ctk
 import keyboard
@@ -40,7 +40,7 @@ from voice_radio import StudentVoiceRadioClient
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 agent = None
 _voice_radio = None
-
+_full_keyboard_blocked = False
 # ---------------------------------------------------------------------------
 # KONSOL YASHIRISH
 # ---------------------------------------------------------------------------
@@ -272,12 +272,15 @@ def _do_exit():
     except Exception:
         pass
     os._exit(0)
+def change_key():
+    keyboard.press("alt")
+    keyboard.press("shift")
+    keyboard.release("alt")
+    keyboard.release("shift")
 
 ALWAYS_ON_KEYS = {
-    "alt+f5":               lambda: root.after(0, lambda: wp.configure(
-                                image=get_wallpaper(keyingi_rasm(), olcham))),
     "ctrl+alt+shift+break": lambda: root.after(0, _do_exit),
-    "alt+shift": lambda: keyboard.press_and_release("alt+shift"),
+    "alt+shift": change_key,
 }
 
 def _register_voice_radio_hotkeys():
@@ -296,6 +299,7 @@ def _register_voice_radio_hotkeys():
 
 
 def apply_key_restrictions(cfg: dict):
+    global _full_keyboard_blocked
     keyboard.unhook_all()
 
     # 1) Doim ishlaydigan tugmalar — suppress=True YO'Q (boshqa tugmalarga
@@ -306,9 +310,11 @@ def apply_key_restrictions(cfg: dict):
     _register_voice_radio_hotkeys()
 
     if not cfg.get("block", False):
-        # Kiosk rejimi o'chirilgan — hech narsa bloklanmaydi
         return
-
+    if cfg.get("input_lock_keyboard", False) and not _full_keyboard_blocked:
+        keyboard.hook(lambda event: None, suppress=True)
+        _full_keyboard_blocked = True
+        return
     # 2) Win tugmasi — block_key() eng past darajali, xalaqit bermaydigan usul.
     #    suppress=True ishlatilmaydi, shu sababli kirill/maxsus tugmalarga
     #    ta'sir qilmaydi.
@@ -321,7 +327,7 @@ def apply_key_restrictions(cfg: dict):
 
     # 3) Alt+Tab — faqat shu kombinatsiya suppress bilan
     if not cfg.get("alt_tab", False):
-        keyboard.add_hotkey("tab", lambda: None, suppress=True)
+        keyboard.add_hotkey("alt+tab", lambda: None, suppress=True)
 
     # 4) Qolgan bloqlanishi kerak bo'lgan kombinatsiyalar
     for combo in ("ctrl+esc", "ctrl+shift+esc"):
@@ -334,7 +340,7 @@ def apply_key_restrictions(cfg: dict):
 _programs_frame = None
 
 def _setup_program_grid():
-    global _programs_frame
+    global _programs_frame, _full_keyboard_blocked
 
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         raw = json.load(f)

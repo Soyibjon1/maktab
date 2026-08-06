@@ -144,10 +144,11 @@ class _AudioPlayer:
 
 
 class StudentVoiceRadioClient:
-    def __init__(self, root: tk.Tk | None, host: str, port: int = 3490, name: str | None = None):
+    def __init__(self, root: tk.Tk | None, host: str, port: int = 3490, name: str | None = None, active=None):
         self.root = root
         self.host = str(host or "").strip()
         self.port = int(port)
+        self.active = active if active else lambda: self._show_indicator("Ustoz gapirmoqda!", "green")
         self.name = name or platform.node() or "Talaba"
         self._sock: socket.socket | None = None
         self._send_lock = threading.Lock()
@@ -161,6 +162,13 @@ class StudentVoiceRadioClient:
         self._mic_queue: queue.Queue[bytes] = queue.Queue(MAX_QUEUE)
         self._mic_sender_thread: threading.Thread | None = None
         self._indicator: tk.Toplevel | None = None
+
+        # Qabul qilinayotgan ovoz holati. Server audio tugaganini alohida
+        # bildirmagani uchun oxirgi paketdan keyingi qisqa sukut aniqlanadi.
+        self._receive_active = False
+        self._receive_hide_timer: threading.Timer | None = None
+        self._receive_state_lock = threading.Lock()
+        self._receive_silence_timeout = 0.30
 
     def rename(self, name: str):
         self.name = name or self.name
@@ -187,6 +195,7 @@ class StudentVoiceRadioClient:
             pass
         self._sock = None
         self._player.stop()
+        self._finish_received_audio()
         self._hide_indicator()
 
     def start_talk(self):
@@ -233,6 +242,7 @@ class StudentVoiceRadioClient:
     def _connect_loop(self):
         while self._running:
             try:
+                print(4)
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(5)
                 sock.connect((self.host, self.port))
@@ -256,16 +266,72 @@ class StudentVoiceRadioClient:
                 self._sock = None
 
     def _recv_loop(self, sock: socket.socket):
-        while self._running:
-            msg = _recv_json(sock)
-            if not msg:
-                break
-            if msg.get("type") == "audio":
+        try:
+            while self._running:
+                msg = _recv_json(sock)
+                if not msg:
+                    break
+
+                if msg.get("type") != "audio":
+                    continue
+
                 try:
                     pcm = base64.b64decode(msg.get("data", ""))
-                    self._player.play(pcm)
                 except Exception:
-                    pass
+                    continue
+
+                if not pcm:
+                    continue
+
+                self._player.play(pcm)
+                self._mark_received_audio()
+        finally:
+            # Ulanish uzilsa indikator ochiq qolib ketmasin.
+            self._finish_received_audio()
+
+    def _mark_received_audio(self):
+        """Audio oqimi boshlanganini belgilaydi va sukut taymerini yangilaydi."""
+        should_activate = False
+
+        with self._receive_state_lock:
+            if not self._receive_active:
+                self._receive_active = True
+                should_activate = True
+
+            if self._receive_hide_timer is not None:
+                self._receive_hide_timer.cancel()
+
+            self._receive_hide_timer = threading.Timer(
+                self._receive_silence_timeout,
+                self._finish_received_audio,
+            )
+            self._receive_hide_timer.daemon = True
+            self._receive_hide_timer.start()
+
+        # Bir audio oqimi davomida faqat bir marta ishlaydi.
+        if should_activate:
+            try:
+                self.active()
+            except Exception as exc:
+                print(f"[Ratsiya] active callback xatosi: {exc}")
+
+    def _finish_received_audio(self):
+        """Audio paketlari kelishi to'xtaganda indikatorni yashiradi."""
+        should_hide = False
+
+        with self._receive_state_lock:
+            if self._receive_hide_timer is not None:
+                self._receive_hide_timer.cancel()
+                self._receive_hide_timer = None
+
+            if self._receive_active:
+                self._receive_active = False
+                should_hide = True
+
+        if should_hide:
+            self._hide_indicator()
+
+
 
     def _mic_callback(self, indata, frames, time_info, status):
         if not self._talking:
@@ -299,7 +365,7 @@ class StudentVoiceRadioClient:
 
     # ───────── Vizual indikator: o'quvchi qachon ovoz ketayotganini ko'rsin ─────────
 
-    def _show_indicator(self):
+    def _show_indicator(self, text="  F9 bosilgan — ovoz ustozga ketmoqda  ", color="#7f1d1d"):
         if not self.root:
             return
         def inner():
@@ -310,11 +376,11 @@ class StudentVoiceRadioClient:
             self._indicator = win
             win.overrideredirect(True)
             win.attributes("-topmost", True)
-            win.configure(bg="#7f1d1d")
+            win.configure(bg=color)
             label = tk.Label(
                 win,
-                text="  F9 bosilgan — ovoz ustozga ketmoqda  ",
-                bg="#7f1d1d",
+                text=text,
+                bg=color,
                 fg="white",
                 font=("Segoe UI", 11, "bold"),
                 padx=12,
