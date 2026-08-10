@@ -23,9 +23,20 @@ def update():
             timeout=10,
         )
         r.raise_for_status()
+
         path = os.path.join(BASE_DIR, filename)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(r.text)
+        os.makedirs(os.path.dirname(path), exist_ok=True)  # fon/ papkasi yo'q bo'lsa yaratadi
+
+        # rasm va binary fayllar uchun wb, qolganlar uchun w
+        binary_ext = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".ico", ".exe"}
+        ext = os.path.splitext(filename)[1].lower()
+
+        if ext in binary_ext:
+            with open(path, "wb") as f:
+                f.write(r.content)   # content — bytes
+        else:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(r.text)      # text — str
 
 def check_and_update() -> bool:
     try:
