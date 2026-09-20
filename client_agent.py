@@ -101,7 +101,7 @@ def run_command(cmd: str) -> tuple[str, str]:
 class ClientAgent:
     def __init__(self, reload=None, name: str = None, on_lower=None,
                  on_update=None, on_audio=None, on_audio_control=None,
-                 on_screen_share=None):
+                 on_screen_share=None, on_audio_isolate=None):
         self._sock = None
         self._sock_lock = threading.Lock()
         self.reload = reload
@@ -110,6 +110,7 @@ class ClientAgent:
         self.on_audio = on_audio                   # (bytes, speed, fmt, start_at) -> None
         self.on_audio_control = on_audio_control    # (action: str) -> None
         self.on_screen_share = on_screen_share      # (action, host, port) -> None
+        self.on_audio_isolate = on_audio_isolate    # (state: bool) -> None
         self._running = True
         self.name = name or CLIENT_NAME
 
@@ -175,10 +176,63 @@ class ClientAgent:
                 ).start()
 
             elif xabar_turi == "config":
+                cfg_data = msg.get("config", {})
+                current_cfg = {}
+                if os.path.exists(CONFIG_PATH):
+                    try:
+                        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                            current_cfg = json.load(f)
+                    except Exception:
+                        current_cfg = {}
+                if isinstance(cfg_data, dict):
+                    current_cfg.update(cfg_data)
+                elif isinstance(cfg_data, str):
+                    try:
+                        parsed = json.loads(cfg_data)
+                        if isinstance(parsed, dict):
+                            current_cfg.update(parsed)
+                    except Exception:
+                        pass
                 with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-                    f.write(json.dumps(msg.get("config", {})))
+                    json.dump(current_cfg, f, ensure_ascii=False, indent=2)
                 if self.reload:
                     self.reload()
+                if self.on_audio_isolate and "isolate_audio" in current_cfg:
+                    self.on_audio_isolate(bool(current_cfg["isolate_audio"]))
+
+            elif xabar_turi == "input_lock":
+                target = msg.get("target", "")
+                state = bool(msg.get("state", True))
+                current_cfg = {}
+                if os.path.exists(CONFIG_PATH):
+                    try:
+                        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                            current_cfg = json.load(f)
+                    except Exception:
+                        current_cfg = {}
+                if target in ("keyboard", "all"):
+                    current_cfg["input_lock_keyboard"] = state
+                if target in ("mouse", "all"):
+                    current_cfg["input_lock_mouse"] = state
+                with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                    json.dump(current_cfg, f, ensure_ascii=False, indent=2)
+                if self.reload:
+                    self.reload()
+
+            elif xabar_turi == "isolate_audio":
+                state = bool(msg.get("state", True))
+                current_cfg = {}
+                if os.path.exists(CONFIG_PATH):
+                    try:
+                        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                            current_cfg = json.load(f)
+                    except Exception:
+                        current_cfg = {}
+                current_cfg["isolate_audio"] = state
+                with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                    json.dump(current_cfg, f, ensure_ascii=False, indent=2)
+                if self.on_audio_isolate:
+                    self.on_audio_isolate(state)
 
             elif xabar_turi == "lower":
                 if self.on_lower:

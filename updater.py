@@ -4,7 +4,7 @@ import requests
 
 REPO    = "Soyibjon1/maktab"
 BRANCH  = "main"
-FILES   = ["Talaba.py", "client_agent.py", "updater.py", "rasm_tahrir.py", "mouse_lock.py", "requirements.txt", 'version.txt', "voice_radio.py", "fon/light.png", "fon/dark.png"]
+FILES   = ["Talaba.py", "client_agent.py", "updater.py", "rasm_tahrir.py", "mouse_lock.py", "screen_share.py", "audio_isolate.py", "requirements.txt", 'version.txt', "voice_radio.py", "fon/light.png", "fon/dark.png"]
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -46,7 +46,7 @@ def check_and_update() -> bool:
         )
         r.raise_for_status()
         if r.text.strip() == CURRENT:
-            print(f"Yagilanihs mavjud emas {r.text.strip()}:{CURRENT}")
+            print(f"Yangilanish mavjud emas {r.text.strip()}:{CURRENT}")
             return False
 
         update()

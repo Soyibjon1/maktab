@@ -242,7 +242,6 @@ class StudentVoiceRadioClient:
     def _connect_loop(self):
         while self._running:
             try:
-                print(4)
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(5)
                 sock.connect((self.host, self.port))
@@ -370,7 +369,13 @@ class StudentVoiceRadioClient:
             return
         def inner():
             if self._indicator and self._indicator.winfo_exists():
-                self._indicator.lift()
+                try:
+                    self._indicator.configure(bg=color)
+                    for child in self._indicator.winfo_children():
+                        child.configure(text=text, bg=color)
+                    self._indicator.lift()
+                except Exception:
+                    pass
                 return
             win = tk.Toplevel(self.root)
             self._indicator = win

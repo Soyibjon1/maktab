@@ -47,7 +47,7 @@ def _extract_via_pywin32(exe_path: str, size=DEFAULT_ICON_SIZE) -> Optional[Imag
         for h in (large or []) + (small or []):
             try:
                 win32gui.DestroyIcon(h)
-            except Exception:
+            except Exception as e:
                 print("Rasm Tahrir-2:", e)
                 pass
         return img.resize(size)
@@ -163,17 +163,19 @@ def make_placeholder_icon(size=DEFAULT_ICON_SIZE) -> Image.Image:
 # ---------------------------------------------------------------------------
 
 def extract_icon_from_exe(exe_path: str, size=DEFAULT_ICON_SIZE) -> Optional[Image.Image]:
-    img = _extract_via_pywin32(exe_path, size)
+    resolved = os.path.expandvars(exe_path)
+    img = _extract_via_pywin32(resolved, size)
     if img is None:
-        img = _extract_via_ctypes(exe_path, size)
+        img = _extract_via_ctypes(resolved, size)
     return img
 
 
 def get_program_icon(program) -> "ctk.CTkImage":
     img = None
-    if program.icon and os.path.exists(program.icon):
+    icon_path = os.path.expandvars(program.icon) if program.icon else ""
+    if icon_path and os.path.exists(icon_path):
         try:
-            img = Image.open(program.icon).convert("RGBA").resize(DEFAULT_ICON_SIZE)
+            img = Image.open(icon_path).convert("RGBA").resize(DEFAULT_ICON_SIZE)
         except Exception as e:
             print("Rasm Tahrir-5:", e)
             img = None

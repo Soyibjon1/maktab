@@ -1,5 +1,7 @@
 import os
+import sys
 from threading import Thread
+
 def _do_update():
     from updater import check_and_update
     updated = check_and_update()
@@ -9,7 +11,7 @@ def _do_update():
     else:
         print("[Updater] Yangilanish yo'q yoki xato.")
 Thread(target=_do_update).start()
-import sys
+
 import json
 import platform
 import subprocess
@@ -32,7 +34,14 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
 from client_agent import ClientAgent, SERVER_HOST
-from mouse_lock import start_mouse_lock, stop_mouse_lock
+from mouse_lock import (
+    start_mouse_lock, stop_mouse_lock,
+    start_keyboard_lock, stop_keyboard_lock,
+    set_kiosk_key_restrictions, set_emergency_exit_callback,
+)
+from audio_isolate import (
+    start_audio_isolation, stop_audio_isolation, set_audio_isolation,
+)
 from rasm_tahrir import get_program_icon, get_wallpaper
 from screen_share import StudentScreenShareViewer
 from voice_radio import StudentVoiceRadioClient
@@ -40,7 +49,6 @@ from voice_radio import StudentVoiceRadioClient
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 agent = None
 _voice_radio = None
-_full_keyboard_blocked = False
 # ---------------------------------------------------------------------------
 # KONSOL YASHIRISH
 # ---------------------------------------------------------------------------
@@ -236,10 +244,11 @@ class LoginFrame(ctk.CTkFrame):
 # ---------------------------------------------------------------------------
 
 def launch_program(program: ProgramEntry):
-    if not program.allowed or not os.path.exists(program.path):
+    resolved = os.path.expandvars(program.path)
+    if not program.allowed or not os.path.exists(resolved):
         return
     try:
-        subprocess.Popen([program.path])
+        subprocess.Popen([resolved])
         root.lower()
     except Exception as e:
         print(f"Dasturni ishga tushirishda xatolik: {e}")
@@ -251,6 +260,14 @@ def launch_program(program: ProgramEntry):
 def _do_exit():
     try:
         stop_mouse_lock()
+    except Exception:
+        pass
+    try:
+        stop_keyboard_lock()
+    except Exception:
+        pass
+    try:
+        stop_audio_isolation()
     except Exception:
         pass
     try:
@@ -272,6 +289,10 @@ def _do_exit():
     except Exception:
         pass
     os._exit(0)
+
+# Favqulodda chiqish hooki (klaviatura bloklangan bo'lsa ham past darajada ishlaydi)
+set_emergency_exit_callback(lambda: root.after(0, _do_exit))
+
 def change_key():
     keyboard.press("alt")
     keyboard.press("shift")
@@ -299,37 +320,24 @@ def _register_voice_radio_hotkeys():
 
 
 def apply_key_restrictions(cfg: dict):
-    global _full_keyboard_blocked
     keyboard.unhook_all()
 
-    # 1) Doim ishlaydigan tugmalar — suppress=True YO'Q (boshqa tugmalarga
-    #    xalaqit bermasligi uchun)
+    # 1) Doim ishlaydigan tugmalar
     for combo, handler in ALWAYS_ON_KEYS.items():
         keyboard.add_hotkey(combo, handler)
 
     _register_voice_radio_hotkeys()
 
+    # 2) Kiosk rejimida Win va Alt+Tab ni pastki darajada (WH_KEYBOARD_LL) bloklash
     if not cfg.get("block", False):
+        set_kiosk_key_restrictions(block_win=False, block_alt_tab=False)
         return
-    if cfg.get("input_lock_keyboard", False) and not _full_keyboard_blocked:
-        keyboard.hook(lambda event: None, suppress=True)
-        _full_keyboard_blocked = True
-        return
-    # 2) Win tugmasi — block_key() eng past darajali, xalaqit bermaydigan usul.
-    #    suppress=True ishlatilmaydi, shu sababli kirill/maxsus tugmalarga
-    #    ta'sir qilmaydi.
-    if not cfg.get("win", False):
-        try:
-            keyboard.block_key("left windows")
-            keyboard.block_key("right windows")
-        except Exception:
-            keyboard.add_hotkey("windows", lambda: None, suppress=True)
 
-    # 3) Alt+Tab — faqat shu kombinatsiya suppress bilan
-    if not cfg.get("alt_tab", False):
-        keyboard.add_hotkey("alt+tab", lambda: None, suppress=True)
+    block_win = not cfg.get("win", False)
+    block_alt_tab = not cfg.get("alt_tab", False)
+    set_kiosk_key_restrictions(block_win=block_win, block_alt_tab=block_alt_tab)
 
-    # 4) Qolgan bloqlanishi kerak bo'lgan kombinatsiyalar
+    # 3) Qo'shimcha tizim kombinatsiyalari
     for combo in ("ctrl+esc", "ctrl+shift+esc"):
         keyboard.add_hotkey(combo, lambda: None, suppress=True)
 
@@ -340,7 +348,7 @@ def apply_key_restrictions(cfg: dict):
 _programs_frame = None
 
 def _setup_program_grid():
-    global _programs_frame, _full_keyboard_blocked
+    global _programs_frame
 
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         raw = json.load(f)
@@ -351,10 +359,24 @@ def _setup_program_grid():
         root.withdraw()
 
     apply_key_restrictions(raw)
+
+    # Sichqonchani to'liq bloklash
     if raw.get("input_lock_mouse", False):
         start_mouse_lock()
     else:
         stop_mouse_lock()
+
+    # Klaviaturani to'liq bloklash
+    if raw.get("input_lock_keyboard", False):
+        start_keyboard_lock()
+    else:
+        stop_keyboard_lock()
+
+    # Faqat Ustoz audio ovozini qoldirish (boshqa ilovalarni mute qilish)
+    if raw.get("isolate_audio", False):
+        start_audio_isolation()
+    else:
+        stop_audio_isolation()
 
     if _programs_frame is not None:
         _programs_frame.destroy()
@@ -375,7 +397,7 @@ def _setup_program_grid():
     else:
         columns = 4
         for idx, program in enumerate(allowed):
-            col, row = divmod(idx, columns)
+            row, col = divmod(idx, columns)
             btn = ctk.CTkButton(
                 _programs_frame,
                 text=program.name,
@@ -505,6 +527,7 @@ agent = ClientAgent(
     on_audio         = lambda b, s, f, d=0: root.after(0, _play_audio, b, s, f, d),
     on_audio_control = lambda a, d=0: root.after(0, _control_audio, a, d),
     on_screen_share  = lambda a, h, p: root.after(0, _handle_screen_share, a, h, p),
+    on_audio_isolate = lambda s: root.after(0, set_audio_isolation, s),
 )
 Thread(target=agent.run, daemon=True).start()
 
