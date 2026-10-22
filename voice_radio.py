@@ -144,11 +144,14 @@ class _AudioPlayer:
 
 
 class StudentVoiceRadioClient:
-    def __init__(self, root: tk.Tk | None, host: str, port: int = 3490, name: str | None = None, active=None):
+    def __init__(self, root: tk.Tk | None, host: str, port: int = 3490, name: str | None = None, active=None,
+                 on_receive_start=None, on_receive_stop=None):
         self.root = root
         self.host = str(host or "").strip()
         self.port = int(port)
         self.active = active if active else lambda: self._show_indicator("Ustoz gapirmoqda!", "green")
+        self.on_receive_start = on_receive_start
+        self.on_receive_stop = on_receive_stop
         self.name = name or platform.node() or "Talaba"
         self._sock: socket.socket | None = None
         self._send_lock = threading.Lock()
@@ -173,6 +176,23 @@ class StudentVoiceRadioClient:
     def rename(self, name: str):
         self.name = name or self.name
         self._send_safe({"type": "hello", "name": self.name})
+
+    def reconnect_to(self, new_host: str):
+        """Server IP o'zgarganda (masalan boshqa IP bilan ulangan yagona serverga) qayta ulanadi."""
+        if not new_host:
+            return
+        new_h = str(new_host).strip()
+        if self.host == new_h and self._connected:
+            return
+        self.host = new_h
+        try:
+            if self._sock:
+                self._sock.close()
+        except Exception:
+            pass
+        self._sock = None
+        self._connected = False
+        print(f"[Ratsiya] Yangi serverga ulanish sozlandi: {self.host}:{self.port}")
 
     def start(self):
         if not AUDIO_AVAILABLE:
@@ -313,6 +333,11 @@ class StudentVoiceRadioClient:
                 self.active()
             except Exception as exc:
                 print(f"[Ratsiya] active callback xatosi: {exc}")
+            if self.on_receive_start:
+                try:
+                    self.on_receive_start()
+                except Exception as exc:
+                    print(f"[Ratsiya] on_receive_start xatosi: {exc}")
 
     def _finish_received_audio(self):
         """Audio paketlari kelishi to'xtaganda indikatorni yashiradi."""
@@ -329,6 +354,11 @@ class StudentVoiceRadioClient:
 
         if should_hide:
             self._hide_indicator()
+            if self.on_receive_stop:
+                try:
+                    self.on_receive_stop()
+                except Exception as exc:
+                    print(f"[Ratsiya] on_receive_stop xatosi: {exc}")
 
 
 

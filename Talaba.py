@@ -1,16 +1,53 @@
 import os
 import sys
+import subprocess
 from threading import Thread
 
+def _restart_app():
+    try:
+        from mouse_lock import stop_mouse_lock, stop_keyboard_lock
+        stop_mouse_lock()
+        stop_keyboard_lock()
+    except Exception:
+        pass
+    try:
+        from audio_isolate import stop_audio_isolation
+        stop_audio_isolation()
+    except Exception:
+        pass
+    try:
+        import keyboard
+        keyboard.unhook_all()
+    except Exception:
+        pass
+    try:
+        if agent:
+            agent.stop()
+    except Exception:
+        pass
+    try:
+        if _voice_radio:
+            _voice_radio.stop()
+    except Exception:
+        pass
+    try:
+        root.destroy()
+    except Exception:
+        pass
+    subprocess.Popen([sys.executable] + sys.argv)
+    os._exit(0)
+
 def _do_update():
-    from updater import check_and_update
-    updated = check_and_update()
-    if updated:
-        print("[Updater] Yangilandi, qayta ishga tushirilmoqda...")
-        os.execv(sys.executable, [sys.executable] + sys.argv)
-    else:
-        print("[Updater] Yangilanish yo'q yoki xato.")
-Thread(target=_do_update).start()
+    try:
+        from updater import check_and_update
+        updated = check_and_update()
+        if updated:
+            print("[Updater] Yangilandi, dastur toza qayta ishga tushirilmoqda...")
+            root.after(100, _restart_app)
+        else:
+            print("[Updater] Yangilanish yo'q.")
+    except Exception as e:
+        print(f"[Updater] Xatolik: {e}")
 
 import json
 import platform
@@ -41,6 +78,7 @@ from mouse_lock import (
 )
 from audio_isolate import (
     start_audio_isolation, stop_audio_isolation, set_audio_isolation,
+    set_mute_all, set_ducking,
 )
 from rasm_tahrir import get_program_icon, get_wallpaper
 from screen_share import StudentScreenShareViewer
@@ -556,10 +594,33 @@ def _control_audio(action: str, delay_sec: float = 0):
             except Exception:
                 pass
 
+def _handle_voice_status(speaking: bool, duck: bool = True, mute: bool = False):
+    """Ustoz gapirayotganda boshqa dasturlar ovozini pasaytirish yoki to'liq o'chirish."""
+    try:
+        if mute:
+            set_mute_all(speaking)
+        elif duck:
+            set_ducking(speaking, level=0.15)
+        else:
+            set_ducking(False)
+    except Exception as e:
+        print(f"[Audio] Voice status xatosi: {e}")
+
+def _handle_audio_policy(mute_all: bool, duck_on_speech: bool):
+    """Ustozdan doimiy audio sozlamasi kelganda."""
+    try:
+        if mute_all:
+            set_mute_all(True)
+        else:
+            set_mute_all(False)
+            set_ducking(False)
+    except Exception as e:
+        print(f"[Audio] Policy xatosi: {e}")
+
 def _on_host_change(new_host: str):
     global _voice_radio
-    if _voice_radio and hasattr(_voice_radio, "host"):
-        _voice_radio.host = new_host
+    if _voice_radio:
+        _voice_radio.reconnect_to(new_host)
 
 # ---------------------------------------------------------------------------
 # RATSİYA & AGENT
@@ -574,6 +635,8 @@ agent = ClientAgent(
     on_screen_share  = lambda a, h, p: root.after(0, _handle_screen_share, a, h, p),
     on_audio_isolate = lambda s: root.after(0, set_audio_isolation, s),
     on_host_change   = lambda h: root.after(0, _on_host_change, h),
+    on_audio_policy  = lambda m, d: root.after(0, _handle_audio_policy, m, d),
+    on_voice_status  = lambda s, d, m: root.after(0, _handle_voice_status, s, d, m),
 )
 
 _voice_radio = StudentVoiceRadioClient(
@@ -581,6 +644,8 @@ _voice_radio = StudentVoiceRadioClient(
     host=agent.active_host,
     port=3490,
     name=platform.node() or "Noma'lum",
+    on_receive_start=lambda: _handle_voice_status(True, duck=agent.duck_on_speech, mute=agent.mute_all),
+    on_receive_stop=lambda: _handle_voice_status(False, duck=agent.duck_on_speech, mute=agent.mute_all),
 )
 _voice_radio.start()
 
@@ -613,5 +678,6 @@ def _show_name_label(name: str):
 _name_label = None
 
 root.after(10, lambda: LoginFrame(root, on_login=on_login))
+root.after(3000, lambda: Thread(target=_do_update, daemon=True).start())
 root.bind("<F11>", lambda e: root.lower())
 root.mainloop()

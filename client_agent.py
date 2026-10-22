@@ -12,14 +12,14 @@ CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
 # ── Standart Sozlamalar ──────────────────────────────────────
 
-DEFAULT_HOSTS = ["192.168.100.250", "192.168.1.100", "127.0.0.1"]
+DEFAULT_HOSTS = ["192.168.100.250", "192.168.1.100", "192.168.0.100", "127.0.0.1"]
 SERVER_PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 3475
 
 # Client nomi: muhit o'zgaruvchisi > kompyuter nomi
 CLIENT_NAME = os.environ.get("CLIENT_NAME") or platform.node() or "Unknown-PC"
 
 RECONNECT_DELAY = 3   # uzilganda qayta urinish oralig'i (soniya)
-CONNECT_TIMEOUT = 2.5 # har bir IP ga ulanish kutish vaqti (soniya)
+CONNECT_TIMEOUT = 1.5 # har bir IP ga ulanish kutish vaqti (soniya)
 CMD_TIMEOUT     = 30  # buyruq bajarish maksimal vaqti (soniya)
 
 
@@ -51,9 +51,14 @@ def load_server_hosts() -> list[str]:
 
 # ── Tarmoq yordamchilari ─────────────────────────────────────
 
-def send_msg(sock, text: str):
+def send_msg(sock, text: str, lock: threading.Lock | None = None):
     data = text.encode("utf-8")
-    sock.sendall(len(data).to_bytes(4, "big") + data)
+    packet = len(data).to_bytes(4, "big") + data
+    if lock:
+        with lock:
+            sock.sendall(packet)
+    else:
+        sock.sendall(packet)
 
 
 def recv_msg(sock) -> str | None:
@@ -114,9 +119,11 @@ class ClientAgent:
     def __init__(self, reload=None, name: str = None, on_lower=None,
                  on_update=None, on_audio=None, on_audio_control=None,
                  on_screen_share=None, on_audio_isolate=None,
-                 on_host_change=None):
+                 on_host_change=None, on_audio_policy=None,
+                 on_voice_status=None):
         self._sock = None
         self._sock_lock = threading.Lock()
+        self._send_lock = threading.Lock()
         self.reload = reload
         self.on_lower = on_lower
         self.on_update = on_update
@@ -125,6 +132,10 @@ class ClientAgent:
         self.on_screen_share = on_screen_share      # (action, host, port) -> None
         self.on_audio_isolate = on_audio_isolate    # (state: bool) -> None
         self.on_host_change = on_host_change        # (new_host: str) -> None
+        self.on_audio_policy = on_audio_policy      # (mute_all: bool, duck_on_speech: bool) -> None
+        self.on_voice_status = on_voice_status      # (speaking: bool, duck: bool, mute: bool) -> None
+        self.mute_all = False
+        self.duck_on_speech = True
         self._running = True
         self.name = name or CLIENT_NAME
         self.server_hosts = load_server_hosts()
@@ -136,7 +147,7 @@ class ClientAgent:
             sock = self._sock
         if sock:
             try:
-                send_msg(sock, json.dumps({"type": "hello", "name": self.name}))
+                send_msg(sock, json.dumps({"type": "hello", "name": self.name}), lock=self._send_lock)
             except Exception as e:
                 print(f"[!] Nomni yangilashda xatolik: {e}")
 
@@ -211,7 +222,7 @@ class ClientAgent:
 
         # O'zini tanishtirish
         hello = json.dumps({"type": "hello", "name": self.name})
-        send_msg(sock, hello)
+        send_msg(sock, hello, lock=self._send_lock)
 
         # Buyruqlarni tinglash
         while self._running:
@@ -246,15 +257,37 @@ class ClientAgent:
                             current_cfg = json.load(f)
                     except Exception:
                         current_cfg = {}
-                if isinstance(cfg_data, dict):
-                    current_cfg.update(cfg_data)
-                elif isinstance(cfg_data, str):
+                if isinstance(cfg_data, str):
                     try:
-                        parsed = json.loads(cfg_data)
-                        if isinstance(parsed, dict):
-                            current_cfg.update(parsed)
+                        cfg_data = json.loads(cfg_data)
                     except Exception:
-                        pass
+                        cfg_data = {}
+                if isinstance(cfg_data, dict):
+                    # Dasturlarni aqlli birlashtirish: mavjud mahalliy dasturlar yo'qolib ketmasin
+                    if "programs" in cfg_data and isinstance(cfg_data["programs"], list):
+                        server_progs = {p.get("name"): p for p in cfg_data["programs"] if isinstance(p, dict)}
+                        local_progs = current_cfg.get("programs", [])
+                        merged_progs = []
+                        seen_names = set()
+                        for lp in local_progs:
+                            name = lp.get("name")
+                            seen_names.add(name)
+                            if name in server_progs:
+                                merged_item = dict(lp)
+                                merged_item["allowed"] = bool(server_progs[name].get("allowed", lp.get("allowed", False)))
+                                merged_progs.append(merged_item)
+                            else:
+                                merged_progs.append(lp)
+                        for sp_name, sp in server_progs.items():
+                            if sp_name and sp_name not in seen_names:
+                                merged_progs.append(sp)
+                        current_cfg["programs"] = merged_progs
+                        for k, v in cfg_data.items():
+                            if k != "programs":
+                                current_cfg[k] = v
+                    else:
+                        current_cfg.update(cfg_data)
+
                 with open(CONFIG_PATH, "w", encoding="utf-8") as f:
                     json.dump(current_cfg, f, ensure_ascii=False, indent=2)
 
@@ -300,9 +333,31 @@ class ClientAgent:
                         "type": "output",
                         "output": f"[{self.name}] {reply_text}\n",
                         "error": "",
-                    }))
+                    }), lock=self._send_lock)
                 except Exception as e:
                     print(f"[Guardian] Yopishda xatolik: {e}")
+
+            elif xabar_turi == "audio_policy":
+                mute_all = bool(msg.get("mute_all", False))
+                duck_on_speech = bool(msg.get("duck_on_speech", True))
+                self.mute_all = mute_all
+                self.duck_on_speech = duck_on_speech
+                print(f"[AudioPolicy] Qabul qilindi: mute_all={mute_all}, duck_on_speech={duck_on_speech}")
+                if self.on_audio_policy:
+                    try:
+                        self.on_audio_policy(mute_all, duck_on_speech)
+                    except Exception as e:
+                        print(f"[AudioPolicy] Callback xatosi: {e}")
+
+            elif xabar_turi == "voice_status":
+                speaking = bool(msg.get("speaking", False))
+                duck = bool(msg.get("duck", self.duck_on_speech))
+                mute = bool(msg.get("mute", self.mute_all))
+                if self.on_voice_status:
+                    try:
+                        self.on_voice_status(speaking, duck, mute)
+                    except Exception as e:
+                        print(f"[VoiceStatus] Callback xatosi: {e}")
 
             elif xabar_turi == "isolate_audio":
                 state = bool(msg.get("state", True))
@@ -371,7 +426,7 @@ class ClientAgent:
                 "output": stdout,
                 "error":  stderr,
             })
-            send_msg(sock, payload)
+            send_msg(sock, payload, lock=self._send_lock)
         except Exception as e:
             print(f"[!] Natijani yuborishda xato: {e}")
 

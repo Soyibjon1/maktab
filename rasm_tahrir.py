@@ -1,4 +1,5 @@
 import os
+import shutil
 import ctypes
 import ctypes.wintypes
 from typing import Optional
@@ -162,11 +163,35 @@ def make_placeholder_icon(size=DEFAULT_ICON_SIZE) -> Image.Image:
 # ASOSIY FUNKSIYA
 # ---------------------------------------------------------------------------
 
+def resolve_exe_file(path_spec: str) -> Optional[str]:
+    """
+    path_spec bir nechta yo'llar (; bilan) yoki argumentli buyruq bo'lishi mumkin.
+    Mavjud bo'lgan birinchi haqiqiy .exe fayl yo'lini topib qaytaradi.
+    """
+    if not path_spec:
+        return None
+    candidates = [p.strip() for p in str(path_spec).split(";") if p.strip()]
+    for cand in candidates:
+        parts = cand.split()
+        if not parts:
+            continue
+        raw_exe = parts[0].strip("\"'")
+        expanded = os.path.expandvars(raw_exe)
+        if os.path.exists(expanded) and os.path.isfile(expanded):
+            return expanded
+        found = shutil.which(raw_exe)
+        if found and os.path.isfile(found):
+            return found
+    return None
+
+
 def extract_icon_from_exe(exe_path: str, size=DEFAULT_ICON_SIZE) -> Optional[Image.Image]:
-    resolved = os.path.expandvars(exe_path)
-    img = _extract_via_pywin32(resolved, size)
+    actual_exe = resolve_exe_file(exe_path) or os.path.expandvars(exe_path)
+    if not actual_exe or not os.path.exists(actual_exe):
+        return None
+    img = _extract_via_pywin32(actual_exe, size)
     if img is None:
-        img = _extract_via_ctypes(resolved, size)
+        img = _extract_via_ctypes(actual_exe, size)
     return img
 
 
