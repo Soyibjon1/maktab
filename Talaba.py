@@ -1,13 +1,27 @@
 import os
 import sys
+
+# ---------------------------------------------------------------------------
+# KONSOL YASHIRISH (Boshqa kutubxonalar yuklanishidan oldin darhol)
+# ---------------------------------------------------------------------------
+if sys.platform == "win32":
+    try:
+        import ctypes
+        _hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if _hwnd:
+            ctypes.windll.user32.ShowWindow(_hwnd, 0)
+    except Exception:
+        pass
+
 import subprocess
 from threading import Thread
 
 def _restart_app():
     try:
-        from mouse_lock import stop_mouse_lock, stop_keyboard_lock
+        from mouse_lock import stop_mouse_lock, stop_keyboard_lock, clear_kiosk_key_restrictions
         stop_mouse_lock()
         stop_keyboard_lock()
+        clear_kiosk_key_restrictions()
     except Exception:
         pass
     try:
@@ -34,7 +48,15 @@ def _restart_app():
         root.destroy()
     except Exception:
         pass
-    subprocess.Popen([sys.executable] + sys.argv)
+    python_exe = sys.executable
+    if sys.platform == "win32":
+        pythonw = os.path.join(os.path.dirname(python_exe), "pythonw.exe")
+        if os.path.exists(pythonw):
+            python_exe = pythonw
+        creationflags = 0x08000000  # CREATE_NO_WINDOW
+        subprocess.Popen([python_exe] + sys.argv, creationflags=creationflags)
+    else:
+        subprocess.Popen([python_exe] + sys.argv)
     os._exit(0)
 
 def _do_update():
@@ -64,9 +86,14 @@ ES_CONTINUOUS = 0x80000000
 ES_SYSTEM_REQUIRED = 0x00000001
 ES_DISPLAY_REQUIRED = 0x00000002
 
-ctypes.windll.kernel32.SetThreadExecutionState(
-    ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED
-)
+if sys.platform == "win32":
+    try:
+        ctypes.windll.kernel32.SetThreadExecutionState(
+            ES_CONTINUOUS | ES_SYSTEM_REQUIRED | ES_DISPLAY_REQUIRED
+        )
+    except Exception:
+        pass
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
@@ -87,16 +114,6 @@ from voice_radio import StudentVoiceRadioClient
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 agent = None
 _voice_radio = None
-# ---------------------------------------------------------------------------
-# KONSOL YASHIRISH
-# ---------------------------------------------------------------------------
-if platform.system() == "Windows":
-    try:
-        _hwnd = ctypes.windll.kernel32.GetConsoleWindow()
-        if _hwnd:
-            ctypes.windll.user32.ShowWindow(_hwnd, 0)
-    except Exception:
-        pass
 
 # ---------------------------------------------------------------------------
 # MA'LUMOTLAR MODELI

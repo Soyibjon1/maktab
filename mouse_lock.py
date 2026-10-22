@@ -17,10 +17,12 @@ WM_QUIT = 0x0012
 VK_TAB = 0x09
 VK_PAUSE = 0x13       # Pause / Break tugmasi (emergency exit)
 VK_ESCAPE = 0x1B
+VK_SPACE = 0x20
 VK_F4 = 0x73
 VK_F9 = 0x78          # Ratsiya push-to-talk
 VK_LWIN = 0x5B
 VK_RWIN = 0x5C
+VK_APPS = 0x5D        # Application / Context menyu tugmasi
 VK_SHIFT = 0x10
 VK_CONTROL = 0x11
 VK_MENU = 0x12        # Alt
@@ -57,6 +59,12 @@ user32.CallNextHookEx.restype = LRESULT
 
 user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
 user32.GetMessageW.restype = wintypes.BOOL
+
+user32.TranslateMessage.argtypes = [ctypes.POINTER(wintypes.MSG)]
+user32.TranslateMessage.restype = wintypes.BOOL
+
+user32.DispatchMessageW.argtypes = [ctypes.POINTER(wintypes.MSG)]
+user32.DispatchMessageW.restype = LRESULT
 
 user32.PostThreadMessageW.argtypes = [wintypes.DWORD, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
 user32.PostThreadMessageW.restype = wintypes.BOOL
@@ -126,7 +134,8 @@ def _run_mouse_loop():
     message = wintypes.MSG()
     try:
         while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
-            pass
+            user32.TranslateMessage(ctypes.byref(message))
+            user32.DispatchMessageW(ctypes.byref(message))
     finally:
         if _mouse_hook:
             user32.UnhookWindowsHookEx(_mouse_hook)
@@ -168,21 +177,21 @@ def _block_keyboard(n_code, w_param, l_param):
     - Favqulodda chiqish (Ctrl+Alt+Shift+Break) doim ishlaydi.
     - Ratsiya (F9) o'quvchi ustoz bilan gaplashishi uchun o'tkaziladi.
     - To'liq bloklash yoqilgan bo'lsa, qolgan hamma tugmalar yutiladi (return 1).
-    - Kiosk rejimida Win, Alt+Tab, Alt+Esc, Ctrl+Esc, Alt+F4 bloklanadi.
+    - Kiosk rejimida Win, Win kombinatsiyalari, Alt+Tab, Alt+Esc, Alt+Space, Ctrl+Esc, Alt+F4 bloklanadi.
     """
     if n_code >= 0:
         try:
             struct = ctypes.cast(l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
             vk = struct.vkCode
             flags = struct.flags
-            alt_down = bool(flags & LLKHF_ALTDOWN)
+            alt_down = bool(flags & LLKHF_ALTDOWN) or _is_vkey_down(VK_MENU)
+            ctrl_down = _is_vkey_down(VK_CONTROL)
+            shift_down = _is_vkey_down(VK_SHIFT)
+            win_down = _is_vkey_down(VK_LWIN) or _is_vkey_down(VK_RWIN)
 
             # 1. Favqulodda chiqish kombinatsiyasi: Ctrl + Alt + Shift + Pause/Break
             if vk == VK_PAUSE:
-                ctrl_down = _is_vkey_down(VK_CONTROL)
-                shift_down = _is_vkey_down(VK_SHIFT)
-                alt_active = alt_down or _is_vkey_down(VK_MENU)
-                if ctrl_down and shift_down and alt_active:
+                if ctrl_down and shift_down and alt_down:
                     if _emergency_exit_callback:
                         try:
                             threading.Thread(target=_emergency_exit_callback, daemon=True).start()
@@ -199,19 +208,23 @@ def _block_keyboard(n_code, w_param, l_param):
                 return 1
 
             # 4. Kiosk qisman cheklovlari
-            if _block_win and vk in (VK_LWIN, VK_RWIN):
-                return 1
+            if _block_win:
+                # Win tugmasi yoki Win bosilgan paytda boshqa istalgan tugma (Win+Tab, Win+D, Win+R, Win+X va h.k.)
+                # hamda menyu tugmasi (VK_APPS = 0x5D)
+                if vk in (VK_LWIN, VK_RWIN, VK_APPS) or win_down:
+                    return 1
 
-            if _block_alt_tab and vk == VK_TAB and alt_down:
-                return 1
+                # Ctrl + Esc (Start menyusi) va Ctrl + Shift + Esc (Task Manager)
+                if vk == VK_ESCAPE and ctrl_down:
+                    return 1
 
-            if _block_alt_tab and vk == VK_ESCAPE and alt_down:
-                return 1
+            if _block_alt_tab:
+                # Alt + Tab, Alt + Esc, Alt + Space
+                if vk in (VK_TAB, VK_ESCAPE, VK_SPACE) and alt_down:
+                    return 1
 
-            if _block_win and vk == VK_ESCAPE and _is_vkey_down(VK_CONTROL):
-                return 1
-
-            if vk == VK_F4 and alt_down:
+            # Alt + F4 har qanday kiosk rejimida bloklanadi
+            if (_block_alt_tab or _block_win) and vk == VK_F4 and alt_down:
                 return 1
 
         except Exception as e:
@@ -239,7 +252,8 @@ def _run_keyboard_loop():
     message = wintypes.MSG()
     try:
         while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
-            pass
+            user32.TranslateMessage(ctypes.byref(message))
+            user32.DispatchMessageW(ctypes.byref(message))
     finally:
         if _keyboard_hook:
             user32.UnhookWindowsHookEx(_keyboard_hook)

