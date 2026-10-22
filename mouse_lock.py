@@ -69,6 +69,11 @@ kernel32.GetModuleHandleW.argtypes = [wintypes.LPCWSTR]
 kernel32.GetModuleHandleW.restype = wintypes.HMODULE
 
 
+try:
+    import keyboard as py_keyboard
+except Exception:
+    py_keyboard = None
+
 # ── Ichki holat ─────────────────────────────────────────────────────────
 
 _mouse_hook = None
@@ -86,6 +91,7 @@ _block_alt_tab = False
 _allow_f9 = True
 _emergency_exit_callback = None
 _keyboard_lock = threading.Lock()
+_py_keyboard_hook = None
 
 
 def _is_vkey_down(vk: int) -> bool:
@@ -161,51 +167,56 @@ def _block_keyboard(n_code, w_param, l_param):
     Klaviaturani to'liq yoki qisman (kiosk) bloklash hooki.
     - Favqulodda chiqish (Ctrl+Alt+Shift+Break) doim ishlaydi.
     - Ratsiya (F9) o'quvchi ustoz bilan gaplashishi uchun o'tkaziladi.
-    - To'liq bloklash yoqilgan bo'lsa, qolgan hamma tugmalar yutiladi.
+    - To'liq bloklash yoqilgan bo'lsa, qolgan hamma tugmalar yutiladi (return 1).
     - Kiosk rejimida Win, Alt+Tab, Alt+Esc, Ctrl+Esc, Alt+F4 bloklanadi.
     """
     if n_code >= 0:
-        struct = ctypes.cast(l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
-        vk = struct.vkCode
-        flags = struct.flags
-        alt_down = bool(flags & LLKHF_ALTDOWN)
+        try:
+            struct = ctypes.cast(l_param, ctypes.POINTER(KBDLLHOOKSTRUCT)).contents
+            vk = struct.vkCode
+            flags = struct.flags
+            alt_down = bool(flags & LLKHF_ALTDOWN)
 
-        # 1. Favqulodda chiqish kombinatsiyasi: Ctrl + Alt + Shift + Pause/Break
-        if vk == VK_PAUSE:
-            ctrl_down = _is_vkey_down(VK_CONTROL)
-            shift_down = _is_vkey_down(VK_SHIFT)
-            alt_active = alt_down or _is_vkey_down(VK_MENU)
-            if ctrl_down and shift_down and alt_active:
-                if _emergency_exit_callback:
-                    try:
-                        threading.Thread(target=_emergency_exit_callback, daemon=True).start()
-                    except Exception as e:
-                        print(f"[KeyLock] Favqulodda chiqishda xato: {e}")
-                return 0
+            # 1. Favqulodda chiqish kombinatsiyasi: Ctrl + Alt + Shift + Pause/Break
+            if vk == VK_PAUSE:
+                ctrl_down = _is_vkey_down(VK_CONTROL)
+                shift_down = _is_vkey_down(VK_SHIFT)
+                alt_active = alt_down or _is_vkey_down(VK_MENU)
+                if ctrl_down and shift_down and alt_active:
+                    if _emergency_exit_callback:
+                        try:
+                            threading.Thread(target=_emergency_exit_callback, daemon=True).start()
+                        except Exception as e:
+                            print(f"[KeyLock] Favqulodda chiqishda xato: {e}")
+                    return 0
 
-        # 2. Ratsiya (F9) — push-to-talk uchun ruxsat berish
-        if _allow_f9 and vk == VK_F9:
-            return user32.CallNextHookEx(_keyboard_hook, n_code, w_param, l_param)
+            # 2. Ratsiya (F9) — push-to-talk uchun ruxsat berish
+            if _allow_f9 and vk == VK_F9:
+                return user32.CallNextHookEx(_keyboard_hook, n_code, w_param, l_param)
 
-        # 3. Agar to'liq klaviatura bloklangan bo'lsa
-        if _is_keyboard_locked:
-            return 1
+            # 3. Agar to'liq klaviatura bloklangan bo'lsa — hech qanday tugma o'tmasin
+            if _is_keyboard_locked:
+                return 1
 
-        # 4. Kiosk qisman cheklovlari
-        if _block_win and vk in (VK_LWIN, VK_RWIN):
-            return 1
+            # 4. Kiosk qisman cheklovlari
+            if _block_win and vk in (VK_LWIN, VK_RWIN):
+                return 1
 
-        if _block_alt_tab and vk == VK_TAB and alt_down:
-            return 1
+            if _block_alt_tab and vk == VK_TAB and alt_down:
+                return 1
 
-        if _block_alt_tab and vk == VK_ESCAPE and alt_down:
-            return 1
+            if _block_alt_tab and vk == VK_ESCAPE and alt_down:
+                return 1
 
-        if _block_win and vk == VK_ESCAPE and _is_vkey_down(VK_CONTROL):
-            return 1
+            if _block_win and vk == VK_ESCAPE and _is_vkey_down(VK_CONTROL):
+                return 1
 
-        if vk == VK_F4 and alt_down:
-            return 1
+            if vk == VK_F4 and alt_down:
+                return 1
+
+        except Exception as e:
+            if _is_keyboard_locked:
+                return 1
 
     return user32.CallNextHookEx(_keyboard_hook, n_code, w_param, l_param)
 
@@ -252,16 +263,42 @@ def _ensure_keyboard_thread():
 
 
 def start_keyboard_lock():
-    global _is_keyboard_locked
+    global _is_keyboard_locked, _py_keyboard_hook
     _is_keyboard_locked = True
     print("[KeyLock] Klaviaturani to'liq bloklash yoqildi.")
+
+    # 1-darajali himoya: Low-Level Hook
     _ensure_keyboard_thread()
+
+    # 2-darajali himoya: keyboard kutubxonasi orqali suppress
+    if py_keyboard and _py_keyboard_hook is None:
+        try:
+            def _suppress_handler(e):
+                if not _is_keyboard_locked:
+                    return True
+                # F9 (ratsiya) ga ruxsat berish
+                name = getattr(e, "name", "") or ""
+                if _allow_f9 and name.lower() == "f9":
+                    return True
+                return False
+
+            _py_keyboard_hook = py_keyboard.hook(_suppress_handler, suppress=True)
+        except Exception as ex:
+            print(f"[KeyLock] py_keyboard suppress ulanmadi: {ex}")
 
 
 def stop_keyboard_lock():
-    global _is_keyboard_locked
+    global _is_keyboard_locked, _py_keyboard_hook
     _is_keyboard_locked = False
     print("[KeyLock] Klaviaturani to'liq bloklash o'chirildi.")
+
+    if py_keyboard and _py_keyboard_hook is not None:
+        try:
+            py_keyboard.unhook(_py_keyboard_hook)
+        except Exception:
+            pass
+        _py_keyboard_hook = None
+
     _ensure_keyboard_thread()
 
 

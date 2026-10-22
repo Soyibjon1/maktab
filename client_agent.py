@@ -7,22 +7,46 @@ import os
 import sys
 import platform
 
-# Fayl joylashgan papka — config.json shu yerda bo'ladi.
-# Avtozagruzka ishga tushirganda CWD boshqa joy bo'lishi mumkin,
-# shu sababli absolut yo'l ishlatamiz.
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
-# ── Sozlamalar ──────────────────────────────────────────────
+# ── Standart Sozlamalar ──────────────────────────────────────
 
-SERVER_HOST = sys.argv[1] if len(sys.argv) > 1 else "192.168.100.250"
-SERVER_PORT  = int(sys.argv[2]) if len(sys.argv) > 2 else 3475
+DEFAULT_HOSTS = ["192.168.100.250", "192.168.1.100", "127.0.0.1"]
+SERVER_PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 3475
 
 # Client nomi: muhit o'zgaruvchisi > kompyuter nomi
 CLIENT_NAME = os.environ.get("CLIENT_NAME") or platform.node() or "Unknown-PC"
 
-RECONNECT_DELAY = 5   # uzilganda qayta urinish oralig'i (soniya)
+RECONNECT_DELAY = 3   # uzilganda qayta urinish oralig'i (soniya)
+CONNECT_TIMEOUT = 2.5 # har bir IP ga ulanish kutish vaqti (soniya)
 CMD_TIMEOUT     = 30  # buyruq bajarish maksimal vaqti (soniya)
+
+
+def load_server_hosts() -> list[str]:
+    """config.json yoki argumentlardan server IP-manzillar ro'yxatini yuklaydi."""
+    hosts = []
+    if len(sys.argv) > 1 and sys.argv[1].strip():
+        hosts.append(sys.argv[1].strip())
+
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                loaded = cfg.get("server_hosts", [])
+                if isinstance(loaded, list):
+                    for h in loaded:
+                        h_str = str(h).strip()
+                        if h_str and h_str not in hosts:
+                            hosts.append(h_str)
+        except Exception as e:
+            print(f"[Config] server_hosts o'qishda xato: {e}")
+
+    for def_h in DEFAULT_HOSTS:
+        if def_h not in hosts:
+            hosts.append(def_h)
+
+    return hosts
 
 
 # ── Tarmoq yordamchilari ─────────────────────────────────────
@@ -54,37 +78,25 @@ def _recvn(sock, n) -> bytes | None:
 # ── Buyruq bajarish ──────────────────────────────────────────
 
 def _detect_encoding() -> str:
-    """
-    Windows CMD ning joriy kod sahifasini aniqlaydi.
-    Linux/Mac da har doim utf-8 qaytaradi.
-    """
     if platform.system() != "Windows":
         return "utf-8"
     try:
-        # `chcp` buyrug'i joriy kod sahifasini chiqaradi: "Active code page: 866"
         out = subprocess.check_output("chcp", shell=True, stderr=subprocess.DEVNULL)
-        # oxirgi raqamlarni olamiz
         page = out.decode("ascii", errors="ignore").strip().split()[-1].rstrip(".")
         return f"cp{page}"
     except Exception:
-        return "cp866"   # Rus Windows uchun standart
+        return "cp866"
 
 
-# Bir marta aniqlab, modul darajasida saqlaymiz
 _CMD_ENCODING = _detect_encoding()
 
 
 def run_command(cmd: str) -> tuple[str, str]:
-    """
-    Buyruqni shell orqali bajaradi.
-    Windows CMD encoding ni avtomatik aniqlab UTF-8 ga o'giradi.
-    (stdout, stderr) juftligini qaytaradi.
-    """
     try:
         result = subprocess.run(
             cmd,
             shell=True,
-            capture_output=True,   # text=False — xom bytes olamiz
+            capture_output=True,
             timeout=CMD_TIMEOUT,
         )
         stdout = result.stdout.decode(_CMD_ENCODING, errors="replace")
@@ -101,7 +113,8 @@ def run_command(cmd: str) -> tuple[str, str]:
 class ClientAgent:
     def __init__(self, reload=None, name: str = None, on_lower=None,
                  on_update=None, on_audio=None, on_audio_control=None,
-                 on_screen_share=None, on_audio_isolate=None):
+                 on_screen_share=None, on_audio_isolate=None,
+                 on_host_change=None):
         self._sock = None
         self._sock_lock = threading.Lock()
         self.reload = reload
@@ -111,15 +124,13 @@ class ClientAgent:
         self.on_audio_control = on_audio_control    # (action: str) -> None
         self.on_screen_share = on_screen_share      # (action, host, port) -> None
         self.on_audio_isolate = on_audio_isolate    # (state: bool) -> None
+        self.on_host_change = on_host_change        # (new_host: str) -> None
         self._running = True
         self.name = name or CLIENT_NAME
+        self.server_hosts = load_server_hosts()
+        self.active_host = self.server_hosts[0] if self.server_hosts else "127.0.0.1"
 
     def rename(self, new_name: str):
-        """
-        Talaba LoginFrame orqali ismini kiritganda chaqiriladi.
-        Serverga qayta "hello" xabarini yuborib, ko'rinadigan nomni
-        yangilaydi (server buni eski manzil bo'yicha yangilaydi).
-        """
         self.name = new_name or self.name
         with self._sock_lock:
             sock = self._sock
@@ -129,41 +140,92 @@ class ClientAgent:
             except Exception as e:
                 print(f"[!] Nomni yangilashda xatolik: {e}")
 
+    def update_server_hosts_list(self, new_hosts: list[str]):
+        """Ustozdan yangi IP manzillar ro'yxati kelganda saqlash."""
+        if not new_hosts or not isinstance(new_hosts, list):
+            return
+        cleaned = [str(h).strip() for h in new_hosts if str(h).strip()]
+        if not cleaned:
+            return
+        self.server_hosts = cleaned
+        current_cfg = {}
+        if os.path.exists(CONFIG_PATH):
+            try:
+                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                    current_cfg = json.load(f)
+            except Exception:
+                current_cfg = {}
+        current_cfg["server_hosts"] = cleaned
+        try:
+            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump(current_cfg, f, ensure_ascii=False, indent=2)
+            print(f"[Agent] Yangi server_hosts saqlandi: {cleaned}")
+        except Exception as e:
+            print(f"[Agent] server_hosts saqlashda xato: {e}")
+
     def run(self):
         print(f"[{self.name}] Agent ishga tushdi.")
-        print(f"Server: {SERVER_HOST}:{SERVER_PORT}")
+        print(f"Ulanish uchun IP ro'yxati: {self.server_hosts}")
+
         while self._running:
-            try:
-                self._connect_and_listen()
-            except Exception as e:
-                print(f"[!] Xato: {e}")
+            sock = None
+            connected_host = None
+
+            # Ro'yxatdagi har bir IP manzilga navbatma-navbat ulanishga harakat qilish
+            for host in list(self.server_hosts):
+                if not self._running:
+                    break
+                print(f"[~] {host}:{SERVER_PORT} ga ulanishga harakat qilinmoqda...")
+                try:
+                    s = socket.create_connection((host, SERVER_PORT), timeout=CONNECT_TIMEOUT)
+                    sock = s
+                    connected_host = host
+                    break
+                except Exception:
+                    continue
+
+            if sock and connected_host:
+                self.active_host = connected_host
+                if self.on_host_change:
+                    try:
+                        self.on_host_change(connected_host)
+                    except Exception:
+                        pass
+                try:
+                    self._listen(sock, connected_host)
+                except Exception as e:
+                    print(f"[!] Aloqa uzildi: {e}")
+            else:
+                print(f"[!] Serverlar ro'yxatidagi hech qaysi IP ga ulanib bo'lmadi.")
+
             if self._running:
+                # Yangilangan server_hosts ni qayta o'qish (agar faylda o'zgargan bo'lsa)
+                self.server_hosts = load_server_hosts()
                 print(f"[~] {RECONNECT_DELAY}s dan keyin qayta urinadi…")
                 time.sleep(RECONNECT_DELAY)
 
-    def _connect_and_listen(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect((SERVER_HOST, SERVER_PORT))
+    def _listen(self, sock: socket.socket, host: str):
         with self._sock_lock:
             self._sock = sock
-        print(f"[✓] Serverga ulandi: {SERVER_HOST}:{SERVER_PORT}")
+        print(f"[✓] Serverga muvaffaqiyatli ulandi: {host}:{SERVER_PORT}")
 
         # O'zini tanishtirish
         hello = json.dumps({"type": "hello", "name": self.name})
         send_msg(sock, hello)
 
         # Buyruqlarni tinglash
-        while True:
+        while self._running:
             raw = recv_msg(sock)
             if raw is None:
-                print("[!] Server uzildi.")
+                print("[!] Serverdan aloqa to'xtadi.")
                 break
             try:
                 msg = json.loads(raw)
             except json.JSONDecodeError:
                 continue
 
-            xabar_turi=msg.get("type")
+            xabar_turi = msg.get("type")
+
             if xabar_turi == "command":
                 cmd = msg.get("cmd", "").strip()
                 if not cmd:
@@ -195,10 +257,18 @@ class ClientAgent:
                         pass
                 with open(CONFIG_PATH, "w", encoding="utf-8") as f:
                     json.dump(current_cfg, f, ensure_ascii=False, indent=2)
+
+                if "server_hosts" in current_cfg and isinstance(current_cfg["server_hosts"], list):
+                    self.server_hosts = current_cfg["server_hosts"]
+
                 if self.reload:
                     self.reload()
                 if self.on_audio_isolate and "isolate_audio" in current_cfg:
                     self.on_audio_isolate(bool(current_cfg["isolate_audio"]))
+
+            elif xabar_turi == "update_server_hosts":
+                hosts = msg.get("hosts", [])
+                self.update_server_hosts_list(hosts)
 
             elif xabar_turi == "input_lock":
                 target = msg.get("target", "")
@@ -218,6 +288,21 @@ class ClientAgent:
                     json.dump(current_cfg, f, ensure_ascii=False, indent=2)
                 if self.reload:
                     self.reload()
+
+            elif xabar_turi == "close_blocked_programs":
+                # CS 1.6 turlari, Roblox, Arduino kabi taqiqlangan dasturlarni darhol yopish
+                targets = msg.get("targets", None)
+                try:
+                    from process_guardian import kill_all_blocked
+                    killed = kill_all_blocked(targets)
+                    reply_text = f"Yopilgan dasturlar: {', '.join(killed)}" if killed else "Hech qanday taqiqlangan dastur topilmadi."
+                    send_msg(sock, json.dumps({
+                        "type": "output",
+                        "output": f"[{self.name}] {reply_text}\n",
+                        "error": "",
+                    }))
+                except Exception as e:
+                    print(f"[Guardian] Yopishda xatolik: {e}")
 
             elif xabar_turi == "isolate_audio":
                 state = bool(msg.get("state", True))
@@ -243,13 +328,6 @@ class ClientAgent:
                     self.on_update()
 
             elif xabar_turi == "audio_data":
-                # Audio faylni base64 formatida qabul qilish.
-                # delay_sec - "xabar qabul qilingandan necha soniya keyin
-                # boshlash kerak". Bu server/client soat farqidan MUSTAQIL
-                # ishlaydi (Unix timestamp solishtirish o'rniga nisbiy
-                # kechikish ishlatiladi) - barcha talabalar deyarli bir
-                # vaqtda xabarni oladi, shuning uchun bir xil kechikish
-                # bilan boshlash amalda sinxron eshitilishini ta'minlaydi.
                 if self.on_audio:
                     import base64
                     try:
@@ -262,29 +340,27 @@ class ClientAgent:
                         print(f"[Audio] Qabul qilishda xatolik: {e}")
 
             elif xabar_turi == "audio_control":
-                # action: "stop"/"pause"/"play". delay_sec - xuddi
-                # audio_data'dagi kabi, sinxron to'xtatish uchun.
                 if self.on_audio_control:
                     action = msg.get("action", "stop")
                     delay_sec = float(msg.get("delay_sec", 0))
                     self.on_audio_control(action, delay_sec)
 
             elif xabar_turi == "screen_share":
-                # Ustoz ekranini alohida stream portdan ko'rsatish.
-                # host bo'sh kelsa, agent ulangan SERVER_HOST ishlatiladi.
                 if self.on_screen_share:
                     action = msg.get("action", "start")
-                    host = msg.get("host") or SERVER_HOST
+                    target_host = msg.get("host") or self.active_host
                     try:
                         port = int(msg.get("port", 3480))
                     except Exception:
                         port = 3480
-                    self.on_screen_share(action, host, port)
+                    self.on_screen_share(action, target_host, port)
 
-
-
-        sock.close()
-        self._sock = None
+        try:
+            sock.close()
+        except Exception:
+            pass
+        with self._sock_lock:
+            self._sock = None
 
     def _execute_and_reply(self, sock, cmd):
         stdout, stderr = run_command(cmd)
@@ -301,11 +377,14 @@ class ClientAgent:
 
     def stop(self):
         self._running = False
-        if self._sock:
-            self._sock.close()
+        with self._sock_lock:
+            if self._sock:
+                try:
+                    self._sock.close()
+                except Exception:
+                    pass
+                self._sock = None
 
-
-# ── Ishga tushirish ──────────────────────────────────────────
 
 if __name__ == "__main__":
     agent = ClientAgent()

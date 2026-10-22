@@ -33,7 +33,7 @@ ctypes.windll.kernel32.SetThreadExecutionState(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
-from client_agent import ClientAgent, SERVER_HOST
+from client_agent import ClientAgent
 from mouse_lock import (
     start_mouse_lock, stop_mouse_lock,
     start_keyboard_lock, stop_keyboard_lock,
@@ -243,12 +243,44 @@ class LoginFrame(ctk.CTkFrame):
 # DASTUR ISHGA TUSHIRISH
 # ---------------------------------------------------------------------------
 
+import shutil
+
+def resolve_program_cmd(path_spec: str) -> list[str] | None:
+    """
+    path_spec bir nechta yo'llar (; bilan) yoki argumentli buyruq bo'lishi mumkin.
+    Masalan: 'C:\\Program Files\\...\\WINWORD.EXE;winword.exe'
+    Yoki: 'pythonw.exe -m idlelib.idle'
+    Mavjud bo'lgan birinchi to'g'ri ijro faylini yoki buyruqni qaytaradi.
+    """
+    candidates = [p.strip() for p in path_spec.split(";") if p.strip()]
+    for cand in candidates:
+        parts = cand.split()
+        if not parts:
+            continue
+        raw_exe = parts[0]
+        expanded_exe = os.path.expandvars(raw_exe)
+
+        # 1. To'g'ridan-to'g'ri mavjud fayl
+        if os.path.exists(expanded_exe):
+            return [expanded_exe] + parts[1:]
+
+        # 2. PATH orqali topish (winword, excel, calc, notepad, mspaint, idle.bat)
+        found = shutil.which(raw_exe)
+        if found:
+            return [found] + parts[1:]
+
+    return None
+
+
 def launch_program(program: ProgramEntry):
-    resolved = os.path.expandvars(program.path)
-    if not program.allowed or not os.path.exists(resolved):
+    if not program.allowed:
+        return
+    cmd = resolve_program_cmd(program.path)
+    if not cmd:
+        print(f"[Launch] Dastur topilmadi: {program.name} ({program.path})")
         return
     try:
-        subprocess.Popen([resolved])
+        subprocess.Popen(cmd)
         root.lower()
     except Exception as e:
         print(f"Dasturni ishga tushirishda xatolik: {e}")
@@ -258,6 +290,11 @@ def launch_program(program: ProgramEntry):
 # ---------------------------------------------------------------------------
 
 def _do_exit():
+    try:
+        from process_guardian import stop_auto_guard
+        stop_auto_guard()
+    except Exception:
+        pass
     try:
         stop_mouse_lock()
     except Exception:
@@ -377,6 +414,22 @@ def _setup_program_grid():
         start_audio_isolation()
     else:
         stop_audio_isolation()
+
+    # Taqiqlangan dasturlarni (CS 1.6 turlari, Roblox, Arduino va hk) nazorat qilish
+    if raw.get("block", False):
+        try:
+            from process_guardian import start_auto_guard, set_blocked_list
+            if "blocked_programs" in raw and isinstance(raw["blocked_programs"], list):
+                set_blocked_list(raw["blocked_programs"])
+            start_auto_guard()
+        except Exception as e:
+            print(f"[Guardian] Boshlashda xato: {e}")
+    else:
+        try:
+            from process_guardian import stop_auto_guard
+            stop_auto_guard()
+        except Exception:
+            pass
 
     if _programs_frame is not None:
         _programs_frame.destroy()
@@ -503,22 +556,14 @@ def _control_audio(action: str, delay_sec: float = 0):
             except Exception:
                 pass
 
-# ---------------------------------------------------------------------------
-# RATSİYA
-# ---------------------------------------------------------------------------
-_voice_radio = StudentVoiceRadioClient(
-    root,
-    host=SERVER_HOST,
-    port=3490,
-    name=platform.node() or "Noma'lum",
-)
-_voice_radio.start()
+def _on_host_change(new_host: str):
+    global _voice_radio
+    if _voice_radio and hasattr(_voice_radio, "host"):
+        _voice_radio.host = new_host
 
 # ---------------------------------------------------------------------------
-# UPDATER
+# RATSİYA & AGENT
 # ---------------------------------------------------------------------------
-_setup_program_grid()
-
 agent = ClientAgent(
     reload           = lambda: root.after(0, yangilash),
     name             = platform.node() or "Noma'lum",
@@ -528,7 +573,21 @@ agent = ClientAgent(
     on_audio_control = lambda a, d=0: root.after(0, _control_audio, a, d),
     on_screen_share  = lambda a, h, p: root.after(0, _handle_screen_share, a, h, p),
     on_audio_isolate = lambda s: root.after(0, set_audio_isolation, s),
+    on_host_change   = lambda h: root.after(0, _on_host_change, h),
 )
+
+_voice_radio = StudentVoiceRadioClient(
+    root,
+    host=agent.active_host,
+    port=3490,
+    name=platform.node() or "Noma'lum",
+)
+_voice_radio.start()
+
+# ---------------------------------------------------------------------------
+# UPDATER
+# ---------------------------------------------------------------------------
+_setup_program_grid()
 Thread(target=agent.run, daemon=True).start()
 
 
