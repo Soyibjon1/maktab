@@ -22,7 +22,7 @@ CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
 
 # ── Standart Sozlamalar ──────────────────────────────────────
 
-DEFAULT_HOSTS = ["192.168.1.3", "192.168.100.250", "192.168.1.100", "192.168.0.100", "127.0.0.1"]
+DEFAULT_HOSTS = ["192.168.1.3", "192.168.100.250", "192.168.100.92", "192.168.0.100", "127.0.0.1"]
 SERVER_PORT = int(sys.argv[2]) if len(sys.argv) > 2 else 3475
 
 # Client nomi: muhit o'zgaruvchisi > kompyuter nomi
